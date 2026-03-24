@@ -18,6 +18,7 @@ A Web Bluetooth dashboard that connects to a **Seeed XIAO nRF52840** (or Sense v
 | BME280 | Temperature, Humidity, Pressure | 0x76/0x77 | Wire (external) |
 | MCP9808 | Precision Temperature | 0x18 | Wire (external) |
 | LSM6DS3TR-C | Accelerometer, Gyroscope | 0x6A | Wire1 (onboard, Sense only) |
+| PDM Microphone | Sound Level (dB) | — | Digital PDM (onboard, Sense only) |
 
 ## Project Structure
 

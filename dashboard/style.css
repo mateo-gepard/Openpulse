@@ -34,6 +34,7 @@
   --accent-precision:  #d97706;
   --accent-accel:      #2563eb;
   --accent-gyro:       #9333ea;
+  --accent-mic:        #e11d48;
   --accent-imu-x:      #ef4444;
   --accent-imu-y:      #22c55e;
   --accent-imu-z:      #3b82f6;
@@ -273,6 +274,7 @@ body {
 .sensor-card[data-sensor="temp-mcp"]  { --card-accent: var(--accent-precision); }
 .sensor-card[data-sensor="accel"]     { --card-accent: var(--accent-accel); }
 .sensor-card[data-sensor="gyro"]      { --card-accent: var(--accent-gyro); }
+.sensor-card[data-sensor="mic"]       { --card-accent: var(--accent-mic); }
 
 .card-header {
   display: flex;
@@ -310,6 +312,7 @@ body {
 .sensor-card[data-sensor="temp-mcp"] .card-icon { background: #fffbeb; color: var(--accent-precision); }
 .sensor-card[data-sensor="accel"]    .card-icon { background: #eff6ff; color: var(--accent-accel); }
 .sensor-card[data-sensor="gyro"]     .card-icon { background: #faf5ff; color: var(--accent-gyro); }
+.sensor-card[data-sensor="mic"]      .card-icon { background: #fff1f2; color: var(--accent-mic); }
 
 [data-theme="dark"] .sensor-card[data-sensor="heart"]    .card-icon { background: rgba(220,38,38,0.12); }
 [data-theme="dark"] .sensor-card[data-sensor="spo2"]     .card-icon { background: rgba(234,88,12,0.12); }
@@ -319,6 +322,7 @@ body {
 [data-theme="dark"] .sensor-card[data-sensor="temp-mcp"] .card-icon { background: rgba(217,119,6,0.12); }
 [data-theme="dark"] .sensor-card[data-sensor="accel"]    .card-icon { background: rgba(37,99,235,0.12); }
 [data-theme="dark"] .sensor-card[data-sensor="gyro"]     .card-icon { background: rgba(147,51,234,0.12); }
+[data-theme="dark"] .sensor-card[data-sensor="mic"]      .card-icon { background: rgba(225,29,72,0.12); }
 
 /* ── IMU Axes Layout ───────────────────────────────────────── */
 .imu-axes {

@@ -1,11 +1,17 @@
 /*
- * Sensor Dashboard v3 — XIAO BLE Sense nRF52840
+ * Sensor Dashboard v5 — XIAO BLE Sense nRF52840
  * 
- * Reads I2C sensors + onboard IMU, exposes data via BLE GATT + Serial.
+ * Reads I2C sensors + onboard IMU + onboard PDM microphone,
+ * exposes data via BLE GATT + Serial.
  *   - MAX30102  (Heart-Rate / SpO2)       addr 0x57  [Wire - external]
  *   - BME280   (Temp / Humidity / Pressure) addr 0x76  [Wire - external]
  *   - MCP9808  (Precision Temperature)     addr 0x18  [Wire - external]
- *   - LSM6DS3TR-C (Accel / Gyro)           addr 0x6A  [Wire1 - onboard, handled by library]
+ *   - LSM6DS3TR-C (Accel / Gyro)           addr 0x6A  [Wire1 - onboard]
+ *   - MSM261D3526H1CPM (PDM Microphone)              [onboard]
+ *
+ * v5 changes:
+ *   - IMU: explicit power pin management for reliable init
+ *   - Microphone: PDM → RMS → dB sound level via BLE
  *
  * Required libraries (install via Arduino Library Manager):
  *   - ArduinoBLE
@@ -27,6 +33,7 @@
 #include <Adafruit_BME280.h>
 #include <Adafruit_MCP9808.h>
 #include "LSM6DS3.h"
+#include <PDM.h>
 
 // ─── BLE UUIDs ───────────────────────────────────────────────
 #define SERVICE_UUID        "12345678-1234-5678-1234-56789abcdef0"
@@ -38,12 +45,16 @@
 #define CHAR_TEMP_MCP_UUID  "12345678-1234-5678-1234-56789abcdef6"
 #define CHAR_ACCEL_UUID     "12345678-1234-5678-1234-56789abcdef7"
 #define CHAR_GYRO_UUID      "12345678-1234-5678-1234-56789abcdef8"
+#define CHAR_MIC_UUID       "12345678-1234-5678-1234-56789abcdef9"
+
+// ─── IMU power pin (onboard LSM6DS3TR-C) ─────────────────────
+#define IMU_POWER_PIN  15   // PIN_LSM6DS3TR_C_POWER on XIAO Sense
 
 // ─── Sensor objects ──────────────────────────────────────────
 MAX30105         particleSensor;
 Adafruit_BME280  bme;
 Adafruit_MCP9808 mcp = Adafruit_MCP9808();
-LSM6DS3          imu(I2C_MODE, 0x6A);  // Seeed library handles Wire1 internally
+LSM6DS3          imu(I2C_MODE, 0x6A);
 
 // ─── BLE objects ─────────────────────────────────────────────
 BLEService sensorService(SERVICE_UUID);
@@ -56,18 +67,68 @@ BLEFloatCharacteristic presChar (CHAR_PRESSURE_UUID,   BLERead | BLENotify);
 BLEFloatCharacteristic tempMChar(CHAR_TEMP_MCP_UUID,   BLERead | BLENotify);
 BLECharacteristic accelChar(CHAR_ACCEL_UUID, BLERead | BLENotify, 12);
 BLECharacteristic gyroChar (CHAR_GYRO_UUID,  BLERead | BLENotify, 12);
+BLEFloatCharacteristic micChar  (CHAR_MIC_UUID,       BLERead | BLENotify);
 
 // ─── Heart-rate algorithm state ──────────────────────────────
-const byte RATE_SIZE = 4;
+const byte RATE_SIZE = 8;
 byte       rates[RATE_SIZE];
-byte       rateSpot    = 0;
-long       lastBeat    = 0;
+byte       rateSpot      = 0;
+byte       validBeats    = 0;
+long       lastBeat      = 0;
 float      beatsPerMinute = 0;
-int        beatAvg     = 0;
+int        beatAvg       = 0;
 bool       fingerPresent = false;
 unsigned long lastFingerTime = 0;
-const long IR_THRESHOLD = 50000;     // IR value above this = finger detected
-const long FINGER_TIMEOUT = 3000;    // ms without finger → reset HR
+const long IR_THRESHOLD = 50000;
+const long FINGER_TIMEOUT = 3000;
+const long MIN_BEAT_INTERVAL = 300;
+const long MAX_BEAT_INTERVAL = 2000;
+
+// ─── SpO2 algorithm state ────────────────────────────────────
+float dcRed   = 0, dcIR   = 0;
+float acRedSum = 0, acIRSum = 0;
+long  spo2SampleCount = 0;
+float lastSpO2 = 0;
+byte  spo2BeatCount = 0;
+const float DC_ALPHA = 0.995;
+const byte  SPO2_MIN_BEATS = 4;
+
+// ─── PDM Microphone state ────────────────────────────────────
+#define PDM_BUFFER_SIZE 256
+short pdmBuffer[PDM_BUFFER_SIZE];
+volatile bool pdmReady = false;
+float cachedMicDB = 0;
+bool  mic_ok = false;
+
+// PDM callback — called by PDM library when buffer is full
+void onPDMdata() {
+  int bytesAvailable = PDM.available();
+  if (bytesAvailable > 0) {
+    int samplesToRead = min(bytesAvailable / 2, PDM_BUFFER_SIZE);
+    PDM.read(pdmBuffer, samplesToRead * 2);
+    pdmReady = true;
+  }
+}
+
+// Compute RMS → dB from the PDM sample buffer
+float computeSoundLevel() {
+  long sumSquares = 0;
+  int count = PDM_BUFFER_SIZE;
+
+  for (int i = 0; i < count; i++) {
+    long sample = pdmBuffer[i];
+    sumSquares += sample * sample;
+  }
+
+  float rms = sqrt((float)sumSquares / count);
+  if (rms < 1.0) rms = 1.0;   // floor to avoid log(0)
+
+  // Convert to dBFS (decibels relative to full-scale)
+  // 16-bit audio: full-scale = 32767
+  float dB = 20.0 * log10(rms / 32767.0) + 120.0;  // offset so quiet ~30-40dB, loud ~90+
+  if (dB < 0) dB = 0;
+  return dB;
+}
 
 // ─── Flags ───────────────────────────────────────────────────
 bool max30102_ok = false;
@@ -77,7 +138,11 @@ bool imu_ok      = false;
 
 // ─── Timing ──────────────────────────────────────────────────
 unsigned long lastBLEUpdate = 0;
-const unsigned long BLE_INTERVAL = 500;  // faster updates = more BLE.poll = stable
+const unsigned long BLE_INTERVAL = 750;
+const unsigned long BLE_WRITE_DELAY = 5;
+
+// ─── BLE watchdog ────────────────────────────────────────────
+bool wasConnected = false;
 
 // ─── Helpers ─────────────────────────────────────────────────
 void writeFloat3(BLECharacteristic &ch, float x, float y, float z) {
@@ -112,11 +177,29 @@ void scanI2C() {
   Serial.println();
 }
 
+void resetHRState() {
+  beatAvg = 0;
+  beatsPerMinute = 0;
+  rateSpot = 0;
+  validBeats = 0;
+  memset(rates, 0, sizeof(rates));
+}
+
+void resetSpO2State() {
+  dcRed = 0;
+  dcIR = 0;
+  acRedSum = 0;
+  acIRSum = 0;
+  spo2SampleCount = 0;
+  lastSpO2 = 0;
+  spo2BeatCount = 0;
+}
+
 // ================================================================
 void setup() {
   Serial.begin(115200);
   delay(3000);
-  Serial.println("=== Sensor Dashboard v3 — XIAO BLE Sense ===\n");
+  Serial.println("=== Sensor Dashboard v5 — XIAO BLE Sense ===\n");
 
   Wire.begin();
   scanI2C();
@@ -124,8 +207,8 @@ void setup() {
   // ── MAX30102 (external, Wire) ─────────────────────────────
   if (particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
     max30102_ok = true;
-    particleSensor.setup(0x1F, 1, 2, 400, 411, 4096);
-    particleSensor.setPulseAmplitudeRed(0x0A);
+    particleSensor.setup(0x1F, 4, 2, 100, 411, 4096);
+    particleSensor.setPulseAmplitudeRed(0x1F);
     particleSensor.setPulseAmplitudeGreen(0);
     Serial.println("[OK]  MAX30102 (Wire)");
   } else {
@@ -152,14 +235,47 @@ void setup() {
     Serial.println("[ERR] MCP9808 not found");
   }
 
-  // ── LSM6DS3 (onboard, Wire1 via library) ──────────────────
-  // The Seeed library internally remaps Wire→Wire1 for XIAO Sense
-  // and handles the IMU power pin automatically
+  // ── LSM6DS3 IMU (onboard, Wire1) ──────────────────────────
+  // v5: Explicitly power on IMU before init for reliable startup
+  Serial.println("[...] Powering on IMU (pin 15)...");
+  pinMode(IMU_POWER_PIN, OUTPUT);
+  #if defined(NRF52840_XXAA)
+    // High-drive GPIO config for reliable power delivery
+    NRF_P1->PIN_CNF[8] = ((uint32_t)NRF_GPIO_PIN_DIR_OUTPUT << GPIO_PIN_CNF_DIR_Pos)
+                        | ((uint32_t)NRF_GPIO_PIN_INPUT_DISCONNECT << GPIO_PIN_CNF_INPUT_Pos)
+                        | ((uint32_t)NRF_GPIO_PIN_NOPULL << GPIO_PIN_CNF_PULL_Pos)
+                        | ((uint32_t)NRF_GPIO_PIN_H0H1 << GPIO_PIN_CNF_DRIVE_Pos)
+                        | ((uint32_t)NRF_GPIO_PIN_NOSENSE << GPIO_PIN_CNF_SENSE_Pos);
+  #endif
+  digitalWrite(IMU_POWER_PIN, HIGH);
+  delay(100);  // give IMU time to boot
+
   if (imu.begin() == 0) {
     imu_ok = true;
     Serial.println("[OK]  LSM6DS3 IMU (onboard, Wire1)");
   } else {
-    Serial.println("[ERR] LSM6DS3 IMU not found");
+    // Retry after power cycle
+    Serial.println("[...] IMU first attempt failed, power cycling...");
+    digitalWrite(IMU_POWER_PIN, LOW);
+    delay(100);
+    digitalWrite(IMU_POWER_PIN, HIGH);
+    delay(500);
+    if (imu.begin() == 0) {
+      imu_ok = true;
+      Serial.println("[OK]  LSM6DS3 IMU (onboard, Wire1) — after power cycle");
+    } else {
+      Serial.println("[ERR] LSM6DS3 IMU not found (is this the Sense variant?)");
+    }
+  }
+
+  // ── PDM Microphone (onboard) ──────────────────────────────
+  PDM.onReceive(onPDMdata);
+  if (PDM.begin(1, 16000)) {  // mono, 16kHz
+    mic_ok = true;
+    PDM.setGain(20);  // moderate gain
+    Serial.println("[OK]  PDM Microphone (onboard, 16kHz mono)");
+  } else {
+    Serial.println("[ERR] PDM Microphone init failed");
   }
 
   // ── BLE ───────────────────────────────────────────────────
@@ -179,6 +295,7 @@ void setup() {
   sensorService.addCharacteristic(tempMChar);
   sensorService.addCharacteristic(accelChar);
   sensorService.addCharacteristic(gyroChar);
+  sensorService.addCharacteristic(micChar);
 
   BLE.addService(sensorService);
 
@@ -190,8 +307,9 @@ void setup() {
   tempMChar.writeValue(0.0f);
   writeFloat3(accelChar, 0, 0, 0);
   writeFloat3(gyroChar,  0, 0, 0);
+  micChar.writeValue(0.0f);
 
-  BLE.setConnectionInterval(6, 40);  // tighter interval = fewer disconnects
+  BLE.setConnectionInterval(6, 40);
   BLE.advertise();
   Serial.println("[OK]  BLE advertising as 'SensorDash'");
   Serial.println("─────────────────────────────────────────\n");
@@ -205,49 +323,108 @@ float cachedAX = 0, cachedAY = 0, cachedAZ = 0;
 float cachedGX = 0, cachedGY = 0, cachedGZ = 0;
 
 unsigned long lastSerialPrint = 0;
-byte sensorSlot = 0;  // round-robin: 0=bme, 1=mcp, 2=imu
+byte sensorSlot = 0;  // round-robin: 0=bme, 1=mcp, 2=imu, 3=mic
 
 // ================================================================
 void loop() {
   BLE.poll();
 
+  // ── PDM Microphone — process when buffer is ready ──────────
+  if (mic_ok && pdmReady) {
+    pdmReady = false;
+    cachedMicDB = computeSoundLevel();
+  }
+
   // ── MAX30102 — every loop iteration (needs fast sampling) ──
   if (max30102_ok) {
     long irValue = particleSensor.getIR();
+    long redValue = particleSensor.getRed();
 
+    // ── Finger detection ──
     if (irValue > IR_THRESHOLD) {
       fingerPresent = true;
       lastFingerTime = millis();
     } else if (millis() - lastFingerTime > FINGER_TIMEOUT) {
       fingerPresent = false;
-      beatAvg = 0;
-      beatsPerMinute = 0;
-      rateSpot = 0;
-      memset(rates, 0, sizeof(rates));
+      resetHRState();
+      resetSpO2State();
     }
 
+    // ── SpO2: track DC baseline and AC amplitude ──
+    if (fingerPresent && irValue > IR_THRESHOLD) {
+      if (dcRed == 0) { dcRed = (float)redValue; dcIR = (float)irValue; }
+
+      dcRed = DC_ALPHA * dcRed + (1.0 - DC_ALPHA) * (float)redValue;
+      dcIR  = DC_ALPHA * dcIR  + (1.0 - DC_ALPHA) * (float)irValue;
+
+      float acRed = fabs((float)redValue - dcRed);
+      float acIR  = fabs((float)irValue  - dcIR);
+      acRedSum += acRed;
+      acIRSum  += acIR;
+      spo2SampleCount++;
+    }
+
+    // ── Heart rate beat detection ──
     if (fingerPresent && checkForBeat(irValue)) {
-      long delta = millis() - lastBeat;
-      lastBeat = millis();
-      beatsPerMinute = 60.0 / (delta / 1000.0);
-      if (beatsPerMinute >= 30 && beatsPerMinute <= 180) {
-        rates[rateSpot++ % RATE_SIZE] = (byte)beatsPerMinute;
-        beatAvg = 0;
-        for (byte x = 0; x < RATE_SIZE; x++) beatAvg += rates[x];
-        beatAvg /= RATE_SIZE;
+      long now = millis();
+      long delta = now - lastBeat;
+
+      if (delta < MIN_BEAT_INTERVAL) {
+        // Skip — noise
+      }
+      else if (lastBeat > 0 && delta > MAX_BEAT_INTERVAL) {
+        resetHRState();
+        lastBeat = now;
+      }
+      else {
+        lastBeat = now;
+        beatsPerMinute = 60.0 / (delta / 1000.0);
+
+        if (beatsPerMinute >= 40 && beatsPerMinute <= 180) {
+          rates[rateSpot % RATE_SIZE] = (byte)beatsPerMinute;
+          rateSpot++;
+          if (validBeats < RATE_SIZE) validBeats++;
+
+          if (validBeats >= 4) {
+            byte count = min(validBeats, RATE_SIZE);
+            int sum = 0;
+            for (byte x = 0; x < count; x++) sum += rates[x];
+            beatAvg = sum / count;
+          }
+
+          spo2BeatCount++;
+          if (spo2BeatCount >= SPO2_MIN_BEATS && spo2SampleCount > 50) {
+            float avgACRed = acRedSum / spo2SampleCount;
+            float avgACIR  = acIRSum  / spo2SampleCount;
+
+            if (dcRed > 0 && dcIR > 0 && avgACIR > 0) {
+              float ratioRed = avgACRed / dcRed;
+              float ratioIR  = avgACIR  / dcIR;
+
+              if (ratioIR > 0) {
+                float R = ratioRed / ratioIR;
+                float spo2 = 104.0 - 17.0 * R;
+                if (spo2 >= 70.0 && spo2 <= 100.0) {
+                  lastSpO2 = spo2;
+                }
+              }
+            }
+            acRedSum = 0;
+            acIRSum  = 0;
+            spo2SampleCount = 0;
+            spo2BeatCount = 0;
+          }
+        }
       }
     }
 
-    cachedHR = fingerPresent ? (float)beatAvg : 0.0f;
-    cachedSpO2 = (fingerPresent && irValue > IR_THRESHOLD)
-                 ? 95.0f + random(0, 40) / 10.0f
-                 : 0.0f;
+    cachedHR = (fingerPresent && validBeats >= 4) ? (float)beatAvg : 0.0f;
+    cachedSpO2 = (fingerPresent && lastSpO2 > 0) ? lastSpO2 : 0.0f;
   }
 
   BLE.poll();
 
   // ── Slow sensors — round-robin, one per loop ───────────────
-  // Spreading reads prevents long blocking that kills BLE
   if (millis() - lastBLEUpdate >= BLE_INTERVAL) {
     lastBLEUpdate = millis();
 
@@ -277,39 +454,80 @@ void loop() {
           cachedGZ = imu.readFloatGyroZ();
         }
         break;
+      case 3:
+        // Mic dB is updated asynchronously via PDM callback
+        // Nothing extra to do here — cachedMicDB is already fresh
+        break;
     }
-    sensorSlot = (sensorSlot + 1) % 3;
+    sensorSlot = (sensorSlot + 1) % 4;  // v5: 4 slots now
 
     BLE.poll();
 
-    // ── BLE write (always, with cached values) ──────────────
+    // ── BLE write (with spaced writes for stability) ────────
     BLEDevice central = BLE.central();
     if (central && central.connected()) {
+      wasConnected = true;
+
       hrChar.writeValue(cachedHR);
+      delay(BLE_WRITE_DELAY);
       BLE.poll();
+
       spo2Char.writeValue(cachedSpO2);
+      delay(BLE_WRITE_DELAY);
+
+      if (!central.connected()) goto bleWriteDone;
+
       tempBChar.writeValue(cachedTempB);
+      delay(BLE_WRITE_DELAY);
+      BLE.poll();
+
       humChar.writeValue(cachedHum);
-      BLE.poll();
+      delay(BLE_WRITE_DELAY);
+
       presChar.writeValue(cachedPres);
-      tempMChar.writeValue(cachedTempM);
-      writeFloat3(accelChar, cachedAX, cachedAY, cachedAZ);
+      delay(BLE_WRITE_DELAY);
       BLE.poll();
+
+      if (!central.connected()) goto bleWriteDone;
+
+      tempMChar.writeValue(cachedTempM);
+      delay(BLE_WRITE_DELAY);
+
+      writeFloat3(accelChar, cachedAX, cachedAY, cachedAZ);
+      delay(BLE_WRITE_DELAY);
+      BLE.poll();
+
       writeFloat3(gyroChar, cachedGX, cachedGY, cachedGZ);
+      delay(BLE_WRITE_DELAY);
+
+      micChar.writeValue(cachedMicDB);
+    }
+    else if (wasConnected) {
+      wasConnected = false;
+      Serial.println("[BLE] Connection lost — restarting advertising");
+      BLE.advertise();
     }
   }
 
+  bleWriteDone:
   BLE.poll();
 
   // ── Serial output — once per second ────────────────────────
   if (millis() - lastSerialPrint >= 1000) {
     lastSerialPrint = millis();
     Serial.print("HR:");    Serial.print(cachedHR, 0);
-    Serial.print(" SpO2:"); Serial.print(cachedSpO2, 0);
+    Serial.print(" SpO2:"); Serial.print(cachedSpO2, 1);
     Serial.print(" T:");    Serial.print(cachedTempB, 1);
     Serial.print(" H:");    Serial.print(cachedHum, 0);
     Serial.print(" P:");    Serial.print(cachedPres, 0);
-    Serial.print(" Tm:");   Serial.println(cachedTempM, 2);
+    Serial.print(" Tm:");   Serial.print(cachedTempM, 2);
+    Serial.print(" Mic:");  Serial.print(cachedMicDB, 1);
+    Serial.print("dB");
+    if (imu_ok) {
+      Serial.print(" AX:"); Serial.print(cachedAX, 2);
+      Serial.print(" AY:"); Serial.print(cachedAY, 2);
+      Serial.print(" AZ:"); Serial.print(cachedAZ, 2);
+    }
+    Serial.println();
   }
 }
-

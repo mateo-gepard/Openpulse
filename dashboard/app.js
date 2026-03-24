@@ -12,6 +12,7 @@ const CHAR_PRESSURE_UUID = '12345678-1234-5678-1234-56789abcdef5';
 const CHAR_TEMP_MCP_UUID = '12345678-1234-5678-1234-56789abcdef6';
 const CHAR_ACCEL_UUID    = '12345678-1234-5678-1234-56789abcdef7';
 const CHAR_GYRO_UUID     = '12345678-1234-5678-1234-56789abcdef8';
+const CHAR_MIC_UUID      = '12345678-1234-5678-1234-56789abcdef9';
 
 // ─── State ───────────────────────────────────────────────────
 let bleDevice     = null;
@@ -20,12 +21,16 @@ let isConnected   = false;
 let debugMode     = false;
 let pollingHandle = null;
 let currentTheme  = 'light';
+let reconnectAttempts = 0;        // v4: auto-reconnect
+const MAX_RECONNECT_ATTEMPTS = 3; // v4: max retries before giving up
+let reconnectTimer = null;        // v4: pending reconnect timeout
 
 const HISTORY_MAX = 60;
 const history = {
   hr: [], spo2: [], tempBme: [], humidity: [], pressure: [], tempMcp: [],
   accelX: [], accelY: [], accelZ: [],
   gyroX: [],  gyroY: [],  gyroZ: [],
+  mic: [],
 };
 
 const chars = {};
@@ -40,6 +45,7 @@ const valEls = {
   humidity: () => $('#val-humidity'),
   pressure: () => $('#val-pressure'),
   tempMcp:  () => $('#val-temp-mcp'),
+  mic:      () => $('#val-mic'),
 };
 
 const imuValEls = {
@@ -56,6 +62,7 @@ const canvasEls = {
   tempMcp:  () => $('#chart-temp-mcp'),
   accel:    () => $('#chart-accel'),
   gyro:     () => $('#chart-gyro'),
+  mic:      () => $('#chart-mic'),
 };
 
 const statEls = {
@@ -65,6 +72,7 @@ const statEls = {
   humidity: { min: () => $('#stat-hum-min'),  max: () => $('#stat-hum-max'),  avg: () => $('#stat-hum-avg') },
   pressure: { min: () => $('#stat-pres-min'), max: () => $('#stat-pres-max'), avg: () => $('#stat-pres-avg') },
   tempMcp:  { min: () => $('#stat-tm-min'),   max: () => $('#stat-tm-max'),   avg: () => $('#stat-tm-avg') },
+  mic:      { min: () => $('#stat-mic-min'),  max: () => $('#stat-mic-max'),  avg: () => $('#stat-mic-avg') },
 };
 
 const imuStatEls = {
@@ -81,6 +89,7 @@ const chartColors = {
   tempMcp:  { light: '#d97706', dark: '#fbbf24' },
   accel:    { light: '#2563eb', dark: '#60a5fa' },
   gyro:     { light: '#9333ea', dark: '#c084fc' },
+  mic:      { light: '#e11d48', dark: '#fb7185' },
 };
 
 const IMU_AXIS_COLORS = {
@@ -244,7 +253,8 @@ async function connect() {
     // IMU: 12-byte characteristics (3 x float32)
     chars.accel    = await service.getCharacteristic(CHAR_ACCEL_UUID);
     chars.gyro     = await service.getCharacteristic(CHAR_GYRO_UUID);
-    logDebug('RX', 'All 8 characteristics ready');
+    chars.mic      = await service.getCharacteristic(CHAR_MIC_UUID);
+    logDebug('RX', 'All 9 characteristics ready');
 
     for (const [key, char] of Object.entries(chars)) {
       await char.startNotifications();
@@ -266,9 +276,13 @@ async function connect() {
 }
 
 function disconnect() {
+  // v4: cancel any pending reconnect
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectAttempts = MAX_RECONNECT_ATTEMPTS; // prevent auto-reconnect on manual disconnect
   if (pollingHandle) { clearInterval(pollingHandle); pollingHandle = null; }
   if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
   setConnected(false);
+  reconnectAttempts = 0; // reset for next manual connect
   logDebug('TX', 'Disconnected by user');
 }
 
@@ -276,16 +290,66 @@ function onDisconnected() {
   if (pollingHandle) { clearInterval(pollingHandle); pollingHandle = null; }
   setConnected(false);
   logDebug('RX', 'Device disconnected');
+
+  // v4: auto-reconnect if we didn't manually disconnect
+  if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS && bleDevice) {
+    reconnectAttempts++;
+    const attempt = reconnectAttempts;
+    logDebug('TX', `Auto-reconnect attempt ${attempt}/${MAX_RECONNECT_ATTEMPTS} in 2s...`);
+    setStatus(`Reconnecting (${attempt}/${MAX_RECONNECT_ATTEMPTS})…`);
+    reconnectTimer = setTimeout(async () => {
+      reconnectTimer = null;
+      if (isConnected) return; // already reconnected
+      try {
+        setStatus('Reconnecting…');
+        bleServer = await bleDevice.gatt.connect();
+        logDebug('RX', 'GATT server reconnected');
+
+        const service = await bleServer.getPrimaryService(SERVICE_UUID);
+        chars.hr       = await service.getCharacteristic(CHAR_HR_UUID);
+        chars.spo2     = await service.getCharacteristic(CHAR_SPO2_UUID);
+        chars.tempBme  = await service.getCharacteristic(CHAR_TEMP_BME_UUID);
+        chars.humidity = await service.getCharacteristic(CHAR_HUMIDITY_UUID);
+        chars.pressure = await service.getCharacteristic(CHAR_PRESSURE_UUID);
+        chars.tempMcp  = await service.getCharacteristic(CHAR_TEMP_MCP_UUID);
+        chars.accel    = await service.getCharacteristic(CHAR_ACCEL_UUID);
+        chars.gyro     = await service.getCharacteristic(CHAR_GYRO_UUID);
+        chars.mic      = await service.getCharacteristic(CHAR_MIC_UUID);
+
+        for (const [key, char] of Object.entries(chars)) {
+          await char.startNotifications();
+          char.addEventListener('characteristicvaluechanged', (e) => {
+            onCharChanged(key, e.target.value);
+          });
+        }
+
+        reconnectAttempts = 0;
+        setConnected(true);
+        pollingHandle = setInterval(pollCharacteristics, 2000);
+        logDebug('RX', 'Auto-reconnect successful');
+      } catch (err) {
+        logDebug('RX', 'Reconnect failed: ' + err.message);
+        onDisconnected(); // will retry if attempts remain
+      }
+    }, 2000);
+  } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    logDebug('RX', 'Max reconnect attempts reached — click Connect to retry');
+    setStatus('Connection lost');
+    reconnectAttempts = 0;
+  }
 }
 
 async function pollCharacteristics() {
   if (!bleServer || !bleServer.connected) return;
-  try {
-    for (const [key, char] of Object.entries(chars)) {
+  // v4: try each characteristic individually so one failure doesn't kill all
+  for (const [key, char] of Object.entries(chars)) {
+    try {
       const val = await char.readValue();
       onCharChanged(key, val);
+    } catch (_) {
+      // Individual read failed — skip this characteristic, continue others
     }
-  } catch (_) { /* ignore read errors */ }
+  }
 }
 
 // ─── Data Handling ───────────────────────────────────────────
@@ -382,6 +446,7 @@ function updateValue(key, val) {
     case 'tempBme':  text = val !== 0 ? val.toFixed(1) : '--'; break;
     case 'humidity': text = val !== 0 ? val.toFixed(1) : '--'; break;
     case 'pressure': text = val !== 0 ? val.toFixed(0) : '--'; break;
+    case 'mic':      text = val > 0 ? val.toFixed(1) : '--'; break;
     case 'tempMcp':  text = val !== 0 ? val.toFixed(2) : '--'; break;
     default:         text = val.toFixed(2);
   }
@@ -405,7 +470,7 @@ function updateStats(key) {
   const els = statEls[key];
   if (!els) return;
 
-  const d = key === 'pressure' ? 0 : key === 'tempMcp' ? 2 : 1;
+  const d = key === 'pressure' ? 0 : key === 'tempMcp' ? 2 : key === 'mic' ? 1 : 1;
   if (els.min()) els.min().textContent = min.toFixed(d);
   if (els.max()) els.max().textContent = max.toFixed(d);
   if (els.avg()) els.avg().textContent = avg.toFixed(d);

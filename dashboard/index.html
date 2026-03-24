@@ -387,10 +387,46 @@
       </div>
     </div>
 
+    <!-- Sound Level (PDM Microphone) -->
+    <div class="sensor-card" data-sensor="mic">
+      <div class="no-data-overlay" id="overlay-mic">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <span>Awaiting connection</span>
+        <div class="no-data-pulse"></div>
+      </div>
+      <div class="card-header">
+        <div class="card-header-left">
+          <div class="card-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <div>
+            <div class="card-title">Sound Level</div>
+            <div class="card-subtitle">PDM Mic &middot; onboard</div>
+          </div>
+        </div>
+        <span class="card-badge">AUDIO</span>
+      </div>
+      <div class="value-row">
+        <span class="value-number" id="val-mic">--</span>
+        <span class="value-unit">dB</span>
+      </div>
+      <div class="value-label">Relative sound pressure level (dBFS)</div>
+      <div class="sparkline-wrap"><canvas id="chart-mic"></canvas></div>
+      <div class="stat-row">
+        <div class="stat-item"><div class="stat-label">Min</div><div class="stat-value" id="stat-mic-min">--</div></div>
+        <div class="stat-item"><div class="stat-label">Max</div><div class="stat-value" id="stat-mic-max">--</div></div>
+        <div class="stat-item"><div class="stat-label">Avg</div><div class="stat-value" id="stat-mic-avg">--</div></div>
+      </div>
+    </div>
+
   </div>
 
   <footer class="footer">
-    Seeed XIAO BLE Sense nRF52840 &middot; MAX30102 &middot; BME280 &middot; MCP9808 &middot; LSM6DS3 &middot; Web Bluetooth
+    Seeed XIAO BLE Sense nRF52840 &middot; MAX30102 &middot; BME280 &middot; MCP9808 &middot; LSM6DS3 &middot; PDM Mic &middot; Web Bluetooth
   </footer>
 
 </div>

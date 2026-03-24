@@ -16,7 +16,7 @@
 ## Phase 1: Base Algorithms (Single Sensor)
 | ID | Name | Sensor | Tier | Status | Spec | Code | Tests |
 |----|------|--------|------|--------|------|------|-------|
-| A01 | Heart Rate | PPG | 0 | ○ spec drafted | [spec](examples/A01_heart_rate_spec.md) | — | — |
+| A01 | Heart Rate | PPG | 0 | ● complete | [spec](../../../../../algorithms/A01_heart_rate/spec.md) | [code](../../../../../firmware/src/algorithms/base/Algo_A01.cpp) | [tests](../../../../../algorithms/A01_heart_rate/test_vectors.h) |
 | A02 | HRV | PPG/ECG | 1 | ○ pending | — | — | — |
 | A03 | SpO2 | PPG Red+IR | 0 | ○ pending | — | — | — |
 | A04 | Respiratory Rate | PPG | 1 | ○ pending | — | — | — |
@@ -81,9 +81,9 @@
 
 ## Progress Summary
 - **Total algorithms**: 72 core + U-series user-created (27 base + 17 cross-sensor + 10 composite + 6 drivers)
-- **Specs written**: 1
-- **Implemented**: 0
-- **Tested**: 0
+- **Specs written**: 2
+- **Implemented**: 2
+- **Tested**: 2
 - **Validated**: 0
 
 ## Phase 4: User-Created Algorithms (U-Series)
@@ -93,8 +93,4 @@ To assign next ID: scan `algorithms/U[0-9][0-9]_*/` directories, take max + 1.
 
 | ID | Name | Category | Channels | Tier | Status | Spec | Code | Tests |
 |----|------|----------|----------|------|--------|------|------|-------|
-| — | *(none yet)* | — | — | — | — | — | — | — |
-
-<!-- When a U-series algorithm is created, add a row here:
-| U01 | Tennis Forehand | sport-motion | ACCEL+GYRO | 1 | ● complete | spec | code | tests |
--->
+| U01 | Tennis Session Analytics | sport-motion | ACCEL+GYRO | 1 | ● complete | [spec](../../../../../algorithms/U01_tennis_session/spec.md) | [code](../../../../../firmware/src/algorithms/base/Algo_U01.cpp) | [tests](../../../../../algorithms/U01_tennis_session/test_vectors.h) |

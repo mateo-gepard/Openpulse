@@ -5,7 +5,7 @@
 // Adaptive peak detection with 8-beat EMA averaging.
 //
 // Category:       health-biometric
-// Classification:  Wellness
+// Classification:  Health Screening
 // Tier:           0 (REALTIME)
 // Consumes:       CH_PPG, CH_ACCEL
 // Consumed by:    A02, A04, A06, A24, X01, C01

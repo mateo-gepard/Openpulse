@@ -33,7 +33,7 @@ public:
     const char* getID() const override { return "A01"; }
     const char* getName() const override { return "Heart Rate"; }
     const char* getUnit() const override { return "BPM"; }
-    AlgoClassification getClassification() const override { return AlgoClassification::WELLNESS; }
+    AlgoClassification getClassification() const override { return AlgoClassification::HEALTH_SCREENING; }
     AlgoTier getTier() const override { return AlgoTier::REALTIME; }
     uint16_t ramUsage() const override { return sizeof(*this); }
 

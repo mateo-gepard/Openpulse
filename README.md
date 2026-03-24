@@ -56,7 +56,9 @@ Openpulse/
 │   │   └── A01_heart_rate_spec.md        # Reference spec (shows expected detail)
 │   └── resources/
 │       ├── AlgorithmBase.h               # Shared types, state machine, base class
-│       └── RingBuffer.h                  # Timestamped circular buffer + stats
+│       ├── RingBuffer.h                  # Timestamped circular buffer + stats
+│       ├── SensorDriverBase.h            # Sensor driver interfaces (mockable)
+│       └── algorithm_registry.md         # Master tracker for all 72 algorithms
 ├── firmware/
 │   ├── sensor_dashboard.ino              # Main firmware (BLE + sensors + algorithms)
 │   └── imu_test/
@@ -319,7 +321,8 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 | `templates/spec_template.md` | Blank algorithm spec — fill in to define any new algorithm |
 | `examples/A01_heart_rate_spec.md` | Complete reference spec with full detail level (adaptive peak detection, SQI computation, 7 test vectors) |
 | `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, `AlgoState` enum (IDLE→ACQUIRING→VALID→LOW_QUALITY), `AlgoTier`, base class interface |
-| `resources/RingBuffer.h` | Timestamped circular buffer with `mean()`, `median()`, `stddev()`, `rms()`, `min()`, `max()`, and `interpolateAt()` for cross-sensor alignment |
+| `resources/SensorDriverBase.h` | Typed sensor driver interfaces: `PPGECGDriver`, `TempDriver`, `EDADriver`, `BioimpedanceDriver`, `IMUDriver`, `MicDriver` — algorithms consume drivers via this API, enabling mock testing and sensor swaps |
+| `resources/algorithm_registry.md` | Master tracker for all 72 algorithms — status, links to specs, progress summary |
 
 ### Key Rules Enforced
 
@@ -345,15 +348,50 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 - Motion artifact rejection for all PPG/ECG algorithms
 - 5+ test vectors per algorithm: normal, boundary, no-signal, artifact, recovery
 
-### Workflow
+### How to Use the Skill
 
+**Step 1: Create a spec for your algorithm**
+```bash
+# Copy the template
+cp .agents/skills/openpulse_algorithm/templates/spec_template.md \
+   algorithms/A03_spo2/spec.md
 ```
-1. Copy spec_template.md → algorithms/<ID>_<name>/spec.md
-2. Fill in every field (sensor, method, parameters, edge cases, references)
-3. Invoke the skill — it reads the spec and generates firmware.h + firmware.cpp
-4. Run against test vectors
-5. Review with the 13-point checklist in SKILL.md §10
+
+**Step 2: Fill in every field**
+
+Use `examples/A01_heart_rate_spec.md` as a reference for the level of detail expected. Key sections:
+- **Sensor Input**: exact chip, channel, sample rate, buffer size
+- **Algorithm**: step-by-step method with citations for every formula
+- **Parameters**: named constants with values, units, and sources
+- **SQI Computation**: how to assess signal quality for this specific algorithm
+- **Edge Cases**: table of failure modes and behaviors
+- **Test Vectors**: 5+ scenarios with expected outputs and tolerances
+
+**Step 3: Invoke the skill**
+
+In your AI coding assistant, reference the skill:
+
+> "Using the openpulse_algorithm_builder skill, implement algorithm A03 from its spec at `algorithms/A03_spo2/spec.md`"
+
+The skill will:
+1. Read the spec completely
+2. Read all dependency specs
+3. Read the sensor driver header
+4. Generate `firmware.h` and `firmware.cpp` following the `AlgorithmBase` pattern
+5. Generate `test_vectors.h` from the spec’s test vector table
+6. Verify against the 13-point review checklist (§10 of SKILL.md)
+
+**Step 4: Update the registry**
+
+Mark the algorithm’s status in `resources/algorithm_registry.md`:
 ```
+| A03 | SpO2 | PPG Red+IR | 0 | ● implemented | [spec](../algorithms/A03_spo2/spec.md) | ✓ | — |
+```
+
+**Step 5: Validate**
+- Flash firmware, check Serial output
+- Run test vectors
+- Verify on dashboard
 
 ---
 
@@ -371,6 +409,50 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 | Hydration Warning (Bioimpedance+Temp) | ✅ Exclusive | No one has both |
 | Biological Age from 12+ biomarkers | ✅ 12+ | Whoop: 9, Oura: ~5 |
 | 3D Strain Score (physical+mental+thermo) | ✅ 3 dimensions | Physical only |
+
+---
+
+## Roadmap & Next Steps
+
+### Phase 0: Sensor Drivers (Current)
+Get raw data from every sensor reliably before touching algorithms.
+
+| Step | Task | Status |
+|------|------|--------|
+| 0.1 | Write driver spec for MAX86150 (PPG+ECG) | Pending |
+| 0.2 | Write driver spec for TMP117 (precision temp) | Pending |
+| 0.3 | Write driver spec for ADS1115 (EDA) | Pending |
+| 0.4 | Write driver spec for AD5933 (bioimpedance) | Pending |
+| 0.5 | Implement & validate all drivers with Serial output | Pending |
+| 0.6 | Build multi-puck I2C bus architecture | Pending |
+
+### Phase 1: Base Algorithms
+Single-sensor algorithms — the building blocks.
+
+| Priority | Algorithms | Why First |
+|----------|------------|----------|
+| P0 (MVP) | A01 HR, A03 SpO2, A09 PI, A21 Steps | Core vitals + activity |
+| P0 (MVP) | A14 EDA Stress, A10 Temp Baseline | Unique selling point |
+| P1 | A02 HRV, A04 Resp Rate, A05 ECG | Medical features |
+| P2 | A07 Waveform, A08 Vascular Age | Advanced PPG analysis |
+
+### Phase 2: Cross-Sensor Fusion
+The features no competitor can offer.
+
+| Priority | Algorithms | Impact |
+|----------|------------|--------|
+| P0 | X01 Blood Pressure, X06 Stress vs. Exercise | Headline features |
+| P1 | X07 Illness Warning, X11 Sleep Phases | Key differentiators |
+| P2 | X12 Biological Age, X17 Apnea Screening | Premium features |
+
+### Phase 3: Composite Scores
+User-facing scores that combine everything.
+
+| Priority | Algorithms | Target |
+|----------|------------|--------|
+| P0 | C01 Recovery, C02 Strain, C03 Sleep | Core app experience |
+| P1 | C04 Bio Age, C06 Training Rec, C09 Women's Health | Differentiation |
+| P2 | C08 Health Report PDF, C10 Personalized Insights | Premium |
 
 ---
 

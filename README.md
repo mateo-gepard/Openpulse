@@ -251,24 +251,58 @@ Dashboard with cards. Each card is the visualization of a module's output.
 ```
 Openpulse/
 ├── .agents/skills/openpulse_algorithm/   # AI Algorithm Builder Skill
-│   ├── SKILL.md                          # Master rules (medical, privacy, firmware)
-│   ├── templates/
-│   │   └── spec_template.md              # Blank algorithm spec template
-│   ├── examples/
-│   │   └── A01_heart_rate_spec.md        # Reference spec (shows expected detail)
+│   ├── SKILL.md                          #   Master rules (medical, privacy, firmware)
+│   ├── templates/spec_template.md        #   Blank algorithm spec template
+│   ├── examples/A01_heart_rate_spec.md   #   Reference spec (full detail)
 │   └── resources/
-│       ├── AlgorithmBase.h               # Shared types, state machine, base class
-│       ├── RingBuffer.h                  # Timestamped circular buffer + stats
-│       ├── SensorDriverBase.h            # Sensor driver interfaces (mockable)
-│       └── algorithm_registry.md         # Master tracker for all 72 algorithms
+│       ├── AlgorithmBase.h               #   Shared types + base class
+│       ├── RingBuffer.h                  #   Timestamped buffer + stats
+│       ├── SensorDriverBase.h            #   Sensor driver interfaces
+│       └── algorithm_registry.md         #   Master tracker (72 algorithms)
+│
+├── algorithms/                           # Algorithm Specs (54 directories)
+│   ├── A01_heart_rate/spec.md            #   Base algorithms (A01–A27)
+│   ├── X01_blood_pressure/spec.md        #   Cross-sensor fusion (X01–X17)
+│   ├── C01_recovery_score/spec.md        #   Composite scores (C01–C10)
+│   └── ...
+│
 ├── firmware/
-│   ├── sensor_dashboard.ino              # Main firmware (BLE + sensors + algorithms)
-│   └── imu_test/
-│       └── imu_test.ino                  # Standalone IMU diagnostic sketch
-├── dashboard/
-│   ├── index.html                        # Dashboard UI (9 sensor cards)
-│   ├── style.css                         # Styling (light/dark theme)
-│   └── app.js                            # Web Bluetooth + data visualization
+│   ├── sensor_dashboard.ino              # Dev prototype firmware (v5)
+│   ├── src/
+│   │   ├── framework/                    #   AlgorithmBase, RingBuffer, filters
+│   │   ├── drivers/                      #   Sensor I2C drivers (per chip)
+│   │   ├── algorithms/
+│   │   │   ├── base/                     #   A01–A27 implementations
+│   │   │   └── fusion/                   #   X01–X17 implementations
+│   │   └── ble/                          #   BLE GATT service definitions
+│   ├── test/
+│   │   └── test_runner.cpp               #   Desktop test harness (clang++)
+│   └── imu_test/imu_test.ino            #   IMU diagnostic sketch
+│
+├── dashboard/                            # Web Dashboard (dev prototype)
+│   ├── index.html
+│   ├── style.css
+│   └── app.js
+│
+├── app/                                  # Mobile App (Phase 2+)
+│   └── src/
+│       ├── modules/                      #   Module engine
+│       ├── data/                         #   SQLite/Realm data layer
+│       ├── screens/                      #   UI screens
+│       ├── onboarding/                   #   Profile selection
+│       └── components/                   #   Reusable UI components
+│
+├── sdk/                                  # Developer SDK (Phase 3+)
+│   ├── js/                               #   JavaScript SDK
+│   ├── python/                           #   Python SDK
+│   └── examples/                         #   Reference modules
+│
+├── tools/                                # Development Tooling
+│   ├── filter_designer.py                #   IIR filter coefficient generator
+│   ├── run_tests.sh                      #   Compile & run desktop tests
+│   └── README.md
+│
+├── docs/                                 # Documentation
 └── README.md
 ```
 

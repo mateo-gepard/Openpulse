@@ -35,7 +35,7 @@ OpenPulse is an open-source wearable health monitor built around the Seeed XIAO 
 - [Firmware](#firmware)
 - [Dev Dashboard](#dev-dashboard)
 - [Algorithms](#algorithms)
-- [AI Algorithm Builder](#ai-algorithm-builder)
+- [AI Algorithm Builder — Spec-Driven Development](#ai-algorithm-builder--spec-driven-development)
 - [Architecture](#architecture)
 - [Getting Started](#getting-started)
 - [Project Structure](#project-structure)
@@ -218,55 +218,288 @@ algorithms/A01_heart_rate/
 
 ---
 
-## AI Algorithm Builder
+## AI Algorithm Builder — Spec-Driven Development
 
-An AI skill (`.agents/skills/openpulse_algorithm/SKILL.md`) that generates complete algorithm packages from a description. It enforces medical correctness, firmware safety, and privacy rules throughout.
+This is the core of OpenPulse. An AI skill (`.agents/skills/openpulse_algorithm/SKILL.md`) that lets **anyone** — a fitness coach, a sleep researcher, a student, a hobbyist — describe a health algorithm in plain English and get back medically-referenced, firmware-ready, tested code with a custom dashboard visualization. No biomedical engineering degree required.
 
-### What It Produces
+The approach is **spec-driven**: before any code is generated, the AI builds a complete specification document that captures every detail — the math, the citations, the edge cases, the signal processing pipeline, the validation targets. The spec is the contract. The code follows from it mechanically. This means the quality of the output isn't dependent on the user's programming ability. It's determined by the rules baked into the skill.
 
-From a natural language request like *"build a tennis serve speed algorithm using the IMU"*, the skill generates:
+### Why This Matters
 
-1. **spec.md** — Algorithm specification with method, parameters, edge cases, physiological references
-2. **display.js** — Custom dashboard visualization (the AI proposes the visual concept and the user approves it)
-3. **firmware .h/.cpp** — C++ implementation following AlgorithmBase patterns
-4. **test_vectors.h** — 5+ test cases with expected outputs
+Traditional wearable algorithm development requires:
+- A biomedical engineer who knows signal processing
+- Familiarity with DSP libraries, filter design, peak detection
+- Access to peer-reviewed literature for validated formulas
+- Knowledge of embedded systems (RAM constraints, no heap allocation, real-time scheduling)
+- Understanding of regulatory classifications (Wellness vs. Health Screening)
+- Test harness design with physiological signal models
 
-### Creation Flow (Guided Mode — 6 Rounds)
+OpenPulse's spec-driven skill handles all of this automatically. The user provides intent ("I want to detect tennis serve speed using the IMU"). The AI provides the science, the engineering, and the safety rails.
 
-| Round | Topic | What Happens |
-|-------|-------|-------------|
-| 1 | **Intent & Scope** | User describes what they want. AI classifies algorithm layer/tier. |
-| 2 | **Visualization** | AI proposes a creative panel concept (ASCII sketch, key elements, rationale). User approves or iterates. |
-| 3 | **Sensors & Hardware** | AI maps algorithm to data channels, confirms sensor requirements. |
-| 4 | **Algorithm Method** | AI proposes 2–3 proven methods with tradeoffs. User picks one. |
-| 5 | **Parameters & Edge Cases** | AI pre-fills parameters from chosen method. User adjusts. |
-| 6 | **Review & Confirm** | Complete spec presented for final approval before code generation. |
+### What Gets Generated
 
-There's also an **Auto Mode** where the AI runs all steps autonomously and presents the spec + visualization at a single checkpoint.
+From a single description, the skill produces a complete algorithm package:
 
-### Rules Enforced
+| File | What It Is |
+|------|-----------|
+| `spec.md` | Full algorithm specification — method, math with citations, parameters, SQI computation, edge cases, validation targets, physiological references |
+| `display.js` | Custom dashboard visualization — `render()` and `update()` functions with full DOM/Canvas access, scoped CSS |
+| `firmware .h` | C++ algorithm header following `AlgorithmBase` |
+| `firmware .cpp` | C++ implementation — static buffers, no heap, state-machine driven |
+| `test_vectors.h` | 7+ test scenarios with mathematical signal models — normal, boundary, no-signal, artifact, gradual transition, edge cases |
 
-- **Medical:** Every formula cites a peer-reviewed paper. Outputs clamped to physiological ranges. SQI (0–1) on every output. Health screening requires "not a medical device" disclaimer.
-- **Privacy:** All processing on-device. No cloud. No PII in BLE payloads.
-- **Firmware safety:** No heap allocation in loop. No `delay()`. Static buffers. Motion artifact rejection.
-- **Dependencies:** Registry lookup validates algorithm ID. Prerequisite algorithms must exist (e.g., X01 blood pressure needs A01 heart rate + A05 ECG rhythm).
+### The 6-Round Guided Creation Flow
 
-### Skill Files
+The skill walks the user through six interactive rounds. At each step, the AI does the heavy lifting and the user validates. No technical knowledge required — the AI explains everything it's doing and why.
+
+**Round 1 — Intent & Scope**
+> *"What do you want to measure or detect?"*
+
+The user describes their idea in plain English. The AI classifies it automatically:
+- **Category**: health-biometric, sport-motion, or hybrid
+- **Layer**: base (single sensor), cross-sensor (fusion), or composite (multi-algorithm)
+- **Tier**: 0 (real-time), 1 (periodic), 2 (on-demand), 3 (offline)
+- **Regulatory**: Wellness, Health Indicator, Health Screening, or Sport Performance
+
+Built-in classification heuristics handle common phrases: "heart rate" → health-biometric/base/Tier 0. "recovery score" → hybrid/composite/Tier 3. "tennis forehand" → sport-motion/base/Tier 1. The user confirms or corrects.
+
+**Round 2 — Visualization**
+
+Before any technical decisions, the AI proposes what the dashboard panel will look like. This is where creative freedom matters — a tennis algorithm gets a court heatmap, not a generic gauge. A sleep algorithm gets a hypnogram, not a bar chart. The AI sketches the concept:
+
+```
+┌─────────────────────────────────────────────────┐
+│  A28: Tennis Serve Speed        gauge · T1      │
+│  ─────────────────────────────────────────────── │
+│                                                 │
+│         ┌──────────────┐    Last 10 serves:     │
+│         │   142 km/h   │    ████████░░ 138      │
+│         │  ◢████████◣  │    █████████░ 142      │
+│         │  100   180   │    ██████░░░░ 127      │
+│         └──────────────┘                        │
+│                                                 │
+│  Concept: Large speed gauge with color arc      │
+│  (green→yellow→red by speed range) + scrolling  │
+│  bar chart of recent serves with speed labels.  │
+│                                                 │
+│  Panel size: 2x1 — needs width for serve list   │
+│                                                 │
+│  Does this look right? Want a different style?  │
+└─────────────────────────────────────────────────┘
+```
+
+The user approves, tweaks, or asks for something completely different. Once agreed, this concept drives the `display.js` that gets generated later.
+
+**Round 3 — Sensors & Hardware**
+
+The AI maps the algorithm to OpenPulse data channels based on what it needs to measure. It explains *why* each sensor is needed:
+
+```
+Channels: CH_ACCEL + CH_GYRO
+Reason: Serve speed requires peak angular velocity (gyro)
+        and linear acceleration at impact (accel).
+        No PPG/ECG/EDA needed — this is pure motion.
+```
+
+If the user suggests a sensor that doesn't make sense (e.g., "use PPG for step counting"), the AI explains why and proposes the correct alternative.
+
+**Round 4 — Algorithm Method**
+
+The AI proposes 2–3 proven methods with trade-offs. For health algorithms, every method must come from peer-reviewed literature. For sport algorithms, validated biomechanical techniques are accepted.
+
+```
+Method A: Peak Angular Velocity Detection
+  How: Detect serve impact as max gyroscope magnitude,
+       convert angular velocity to racquet-head speed.
+  Source: Camomilla et al. (2018), Sensors.
+  Pros: Simple, low latency, proven for racquet sports.
+  Cons: Requires calibration for racquet length.
+  ★ Recommended
+
+Method B: IMU Sensor Fusion (Madgwick + Kinematic Chain)
+  How: Full orientation tracking → derive hand speed
+       from quaternion differentiation.
+  Source: Madgwick (2010), ICORR.
+  Pros: More accurate absolute speed.
+  Cons: Higher compute, drift over time, needs magnetometer.
+
+Which method?
+```
+
+The user picks one. No need to read the papers — the AI has already evaluated the trade-offs.
+
+**Round 5 — Parameters & Edge Cases**
+
+The AI pre-fills all algorithm parameters from the chosen method and presents them for review:
+
+```
+Parameter Table:
+  | Parameter       | Default | Range    | Why                          |
+  |-----------------|---------|----------|------------------------------|
+  | Impact threshold| 8 g     | 4–15 g  | Minimum accel for serve hit  |
+  | Window size     | 200 ms  | 50–500  | Capture duration around peak |
+  | Cooldown        | 2000 ms | 500–5000| Prevent double-counting      |
+
+Edge Cases:
+  | Condition           | Behavior                              |
+  |---------------------|---------------------------------------|
+  | Sensor not worn     | SQI = 0, suppress output ("--")       |
+  | Walking with racquet| Below threshold → no detection        |
+  | Double-bounce serve | Cooldown prevents duplicate           |
+  | Extreme temperature | No effect on IMU accuracy             |
+```
+
+If the user sets extreme values, the AI warns: *"SQI threshold of 0.95 means the algorithm will suppress output almost always — most algorithms use 0.3–0.6."*
+
+**Round 6 — Review & Confirm**
+
+The complete `spec.md` is presented. The user reviews everything — method, parameters, edge cases, references, validation targets — and confirms. Only then does code generation begin.
+
+### Medical Correctness — Built Into Every Algorithm
+
+The skill enforces medical-grade rigor regardless of who's building the algorithm. These rules are non-negotiable:
+
+**Every formula must cite a source.**
+Not a blog post. Not Stack Overflow. Peer-reviewed journals (IEEE, JBHI, Physiological Measurement), chip manufacturer app notes (Maxim, Analog Devices), validated open-source libraries (PhysioNet, HeartPy, NeuroKit2), or textbooks (Webster, Bronzino). The citation goes inline with the code:
+
+```cpp
+// SpO2 = 110 - 25 * R
+// Source: Maxim AN6409 "Guidelines for SpO2 Measurement Using MAX30101/2"
+// Validated range: R ∈ [0.4, 1.0] → SpO2 ∈ [85%, 100%]
+```
+
+**Every output is hard-clamped to physiological limits.**
+
+| Metric | Clamped Range |
+|--------|--------------|
+| Heart Rate | 30–220 BPM |
+| SpO2 | 70–100% |
+| Respiratory Rate | 4–60 breaths/min |
+| Blood Pressure | SBP 60–250, DBP 30–150 mmHg |
+| Skin Temperature | 25–42°C |
+| HRV RMSSD | 0–300 ms |
+| EDA | 0.01–100 µS |
+
+An algorithm can never output "heart rate: 350 BPM" or "SpO2: -12%". The clamping is enforced in the generated firmware code.
+
+**Every real-time algorithm produces a Signal Quality Index (SQI).**
+
+```cpp
+struct AlgorithmOutput {
+    float    value;           // The measurement
+    float    sqi;             // 0.0 = garbage, 1.0 = perfect
+    uint32_t timestamp_ms;
+    bool     valid;           // false → suppress display
+};
+```
+
+When SQI drops below the algorithm-specific threshold, the output is suppressed entirely — the dashboard shows `--` instead of bad data. SpO2 requires SQI ≥ 0.6 (extremely motion-sensitive). Heart rate is more forgiving at SQI ≥ 0.3. The skill auto-selects appropriate thresholds based on the algorithm type.
+
+**Calibration is transparent, never silent.**
+
+Algorithms requiring calibration (blood pressure, body composition) use an extended output struct:
+
+```cpp
+struct CalibratedOutput {
+    float value;                // Point estimate
+    float ci_low, ci_high;     // 95% confidence interval
+    float sqi;
+    bool  calibrated;           // false → "Calibration needed"
+    uint32_t calibration_age_ms; // Prompt recalibration after 14 days
+};
+```
+
+An uncalibrated algorithm will never silently output clinical-grade numbers. It shows "Calibration needed" until properly calibrated, and tracks how old the calibration is.
+
+**Health Screening algorithms carry a mandatory disclaimer.**
+
+Any algorithm classified as Health Screening (SpO2, blood pressure, ECG rhythm analysis) displays: *"This is not a medical device. Consult a healthcare provider for medical decisions."* The skill adds this automatically.
+
+### Dependency Resolution
+
+Before generating a composite or cross-sensor algorithm, the skill traces the full dependency tree:
+
+```
+C01_recovery_score
+├── A01_heart_rate ──── exists? ✓
+├── A02_hrv ─────────── exists? ✓ (spec only)
+├── A23_sleep_detection ── exists? ✗
+└── X05_autonomic_balance ── exists? ✗
+    └── A02_hrv ──── (already checked)
+```
+
+If dependencies are missing, the user gets three options:
+1. **Build the chain** — generate missing dependencies bottom-up (recommended)
+2. **Build with stubs** — placeholder code for fast prototyping
+3. **Start with a leaf** — build the deepest missing dependency first
+
+The skill never silently skips a dependency. If a composite calls `getHRV()`, it verifies A02 exists and output types match.
+
+### Validation — Not Afterthoughts, Requirements
+
+Every algorithm spec includes validation targets against established datasets:
+
+| Metric | Reference Dataset | Target |
+|--------|------------------|--------|
+| Heart Rate | MIT-BIH Arrhythmia DB | MAE < 2 BPM vs. ECG |
+| HRV (RMSSD) | MIT-BIH NSR | Correlation r ≥ 0.95 |
+| SpO2 | MIMIC-III Waveform | Bias < 2% vs. CO-Oximetry |
+| Sleep Staging | Sleep-EDF | Cohen's κ ≥ 0.6 (4-class) |
+| Blood Pressure | MIMIC-III (ECG+PPG+ABP) | RMSE < 5 mmHg (AAMI standard) |
+| Activity Recognition | UCI HAR Dataset | F1 ≥ 0.90 (6-class) |
+| Step Counting | PAMAP2 | Error < 5% per 100 steps |
+
+Test vectors use **mathematical signal models**, not hardcoded arrays. Each algorithm gets a minimum of 7 scenarios: normal operation, boundary low, boundary high, no signal, heavy artifact, gradual transition, and low-quality edge case.
+
+### Privacy — Enforced at the Architecture Level
+
+- All processing on-device. No algorithm can phone home, beacon, or send data to a server.
+- BLE payloads contain only computed float values (4 bytes per metric). No PII, no raw waveforms.
+- Device name is generic ("OpenPulse"). No user identifiers in broadcast.
+- All user data in browser localStorage, deletable via a single button.
+- No internet required for any algorithm to function.
+
+### Firmware Safety — Embedded Constraints Built In
+
+The generated C++ code follows strict embedded rules for the nRF52840 (256KB RAM):
+
+- **No `malloc`/`new` in the main loop** — all buffers are statically allocated at compile time
+- **No `delay()`** — everything runs as a state machine via the Scheduler
+- **Motion artifact rejection** for all PPG/ECG algorithms — the SQI computation accounts for accelerometer data
+- **Static RAM budget** declared in every spec — the generated code stays within it
+- **Power mode declared** — continuous, duty-cycled, or on-demand — so the firmware can manage battery life
+
+### What This Means in Practice
+
+A fitness coach who wants a "tennis serve speed detector" describes it in English. The AI:
+
+1. Classifies it (sport-motion/base/Tier 1)
+2. Proposes a court heatmap + speed gauge visualization
+3. Maps it to IMU channels (accel + gyro)
+4. Proposes peak angular velocity detection from Camomilla et al. (2018)
+5. Pre-fills parameters (8g threshold, 200ms window, 2s cooldown)
+6. Generates a complete spec with 7 test scenarios
+7. Produces firmware C++ with static buffers and no heap allocation
+8. Produces a custom `display.js` with the court heatmap the user approved
+
+The result is the same quality you'd get from a biomedical engineering team — cited formulas, clamped outputs, signal quality gating, motion artifact rejection, embedded safety, and validated test vectors. The difference is it takes minutes instead of weeks, and it's accessible to anyone who can describe what they want to measure.
+
+### Skill Files Reference
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | 12-section master rulebook |
-| `templates/spec_template.md` | Blank algorithm spec template |
-| `templates/firmware_header_template.h` | C++ `.h` template |
-| `templates/firmware_impl_template.cpp` | C++ `.cpp` template |
-| `templates/display_module_template.js` | Dashboard display module template |
-| `templates/tier3_dashboard_template.js` | Tier 3 test scenario template |
-| `examples/A01_heart_rate_spec.md` | Complete reference spec |
-| `resources/algorithm_registry.md` | Master status tracker (54 algorithms) |
-| `resources/sensor_validation.md` | Channel-to-sensor mapping rules |
-| `resources/AlgorithmBase.h` | Shared C++ types and base class |
-| `resources/RingBuffer.h` | Timestamped circular buffer |
-| `resources/SensorDriverBase.h` | Driver interfaces per sensor type |
+| `SKILL.md` | 12-section master rulebook covering medical correctness, privacy, firmware safety, signal processing, code generation |
+| `templates/spec_template.md` | Blank algorithm spec — every field required, no blanks, no TODOs |
+| `templates/firmware_header_template.h` | C++ `.h` template using `AlgorithmBase` |
+| `templates/firmware_impl_template.cpp` | C++ `.cpp` template with static buffers and state machines |
+| `templates/display_module_template.js` | Dashboard display module with `render()`/`update()` API |
+| `templates/tier3_dashboard_template.js` | Tier 3 browser-side test scenario template |
+| `examples/A01_heart_rate_spec.md` | Complete reference spec — adaptive peak detection, SQI, 7 test vectors |
+| `resources/algorithm_registry.md` | Master status tracker for all 54 algorithm slots |
+| `resources/sensor_validation.md` | Channel-to-sensor hardware truth tables |
+| `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, base class |
+| `resources/RingBuffer.h` | Timestamped circular buffer with stats and cross-sensor interpolation |
+| `resources/SensorDriverBase.h` | Typed driver interfaces per sensor type |
 
 ---
 

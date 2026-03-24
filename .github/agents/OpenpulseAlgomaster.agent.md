@@ -1,4 +1,6 @@
 ---
+name: OpenpulseAlgomaster
+---
 name: openpulse_algorithm_builder
 description: >
   End-to-end algorithm builder for the OpenPulse wearable health platform.
@@ -313,15 +315,9 @@ Step 4: GENERATE SPEC
   ├── Include: display configuration (§12)
   └── Include: references with DOIs where available
 
-Step 5: ▶▶▶ CHECKPOINT — SHOW SPEC + VISUALIZATION TO USER ◀◀◀
+Step 5: ▶▶▶ CHECKPOINT — SHOW SPEC TO USER ◀◀◀
   ├── Present the complete spec.md
-  ├── Present a visualization concept (same format as Guided Mode Round 2):
-  │   • Describe what the panel will look like in 2–3 sentences
-  │   • Sketch the layout (ASCII or prose): what elements, where, how they animate
-  │   • Explain why this visualization fits the algorithm's output
-  │   • Mention any special canvases (heatmaps, waveforms, radar charts, etc.)
-  ├── Say: "Here's the algorithm spec and my visualization concept.
-  │         Review both and confirm to proceed, or tell me what to change."
+  ├── Say: "Here's the algorithm spec. Review it and confirm to proceed with building all files, or tell me what to change."
   └── WAIT for user confirmation
 
 Step 6: BUILD (after user confirms)
@@ -391,51 +387,7 @@ QUESTIONS FOR ROUND 1:
 
 After Round 1: classify the algorithm using §1.1 Category Router.
 
-### 5.2 Round 2 — Visualization
-
-Before diving into technical details, propose a visualization concept. The AI
-designs the panel based on what the algorithm produces — this is where creative
-freedom shines. Present the concept for user feedback BEFORE locking anything in.
-
-```
-ROUND 2 FORMAT:
-"Here's how I'd visualize this on the dashboard:
-
-  ┌─────────────────────────────────────────┐
-  │  [ID]: [Name]           [layout] · T[n] │
-  │  ─────────────────────────────────────── │
-  │                                         │
-  │  [ASCII sketch of the panel layout]     │
-  │  E.g.: big number with zone arc,        │
-  │        scrolling waveform, court heatmap │
-  │        radar chart, phase bar, etc.     │
-  │                                         │
-  └─────────────────────────────────────────┘
-
-  Concept: [2-3 sentences describing what the user will see]
-
-  Key elements:
-  • [Element 1] — [what it shows and why]
-  • [Element 2] — [what it shows and why]
-  • [Element 3] — [what it shows and why]
-
-  Panel size: [1x1 | 2x1 | 2x2] — [why this size]
-
-  Does this look right? Want a different style (e.g., more charts,
-  simpler, heatmap instead of gauge, bigger panel)?"
-```
-
-**GUIDELINES FOR ROUND 2:**
-- Think about what the DATA looks like, not what category the algorithm is in
-- A tennis algorithm might need a court heatmap — not a generic gauge
-- A cardiac algorithm might need a scrolling ECG waveform — not a pie chart
-- A composite score might need a score ring with breakdown bars
-- Be creative: radar charts, body maps, spectrograms, Poincaré plots are all fair game
-- If the user doesn't like the concept, iterate — propose alternatives
-- Once the user approves (or says "looks good"), move to Round 3
-- The approved concept drives the `display.js` generation in §12
-
-### 5.3 Round 3 — Sensors & Hardware
+### 5.2 Round 2 — Sensors & Hardware
 
 AI pre-fills recommendations based on Round 1, then presents for confirmation:
 
@@ -459,7 +411,7 @@ ROUND 2 FORMAT:
 - If the user agrees with recommendation → proceed to Round 3
 - If the user adds sensors → validate each addition before accepting
 
-### 5.4 Round 4 — Algorithm Method
+### 5.3 Round 3 — Algorithm Method
 
 AI proposes 2–3 proven methods:
 
@@ -486,7 +438,7 @@ ROUND 3 FORMAT:
 For HEALTH algorithms: methods MUST come from peer-reviewed literature.
 For SPORT algorithms: methods can come from biomechanics literature or validated IMU analysis techniques.
 
-### 5.5 Round 5 — Parameters & Edge Cases
+### 5.4 Round 4 — Parameters & Edge Cases
 
 AI pre-fills from the chosen method, presents key parameters:
 
@@ -506,11 +458,11 @@ ROUND 4 FORMAT:
   Anything you'd like to adjust, or shall I proceed with these defaults?"
 ```
 
-**VALIDATION IN ROUND 5:**
+**VALIDATION IN ROUND 4:**
 - If user sets extreme parameter values → warn with context (e.g., "SQI threshold of 0.95 means the algorithm will suppress output almost always — most algorithms use 0.3–0.6")
 - Accept reasonable customizations without pushback
 
-### 5.6 Round 6 — Review & Confirm
+### 5.5 Round 5 — Review & Confirm
 
 Present the complete spec. Same checkpoint as Auto Mode Step 5:
 
@@ -1109,9 +1061,9 @@ scenarios.forEach(s => {
 
 **Rule:** If the algorithm is Tier 3, generate `test_scenarios.js` instead of `test_vectors.h`. If the algorithm has both firmware (Tier 0–2) and companion (Tier 3) components, generate both.
 
-### Step 7: Generate `display.js` (dashboard visualization module)
+### Step 7: Generate `display.js` (dashboard render module)
 
-Write `render()` and `update()` functions that build a custom visualization for this algorithm. The AI has full creative control — design the visualization to best communicate what the algorithm produces. See §12 for the API contract and guidelines.
+See §12 for display module specification.
 
 ### Step 8: Generate `algo_<id>.js` (Tier 3 only)
 
@@ -1129,183 +1081,131 @@ Run the review checklist from §16 mentally. If any check fails, fix it before r
 
 ## 12. DISPLAY MODULE GENERATION
 
-Each algorithm ships a `display.js` file containing **executable visualization code**. The AI has **full creative control** over how the algorithm renders on the dashboard — there is no fixed menu of layout types. The visualization emerges from the algorithm's purpose.
+Each algorithm ships a `display.js` file that declares how it should render on the dashboard.
 
-### 12.1 Architecture
-
-The dashboard is a generic execution engine. When a panel opens, it calls `render()` to build the DOM. On every sensor tick, it calls `update()` with fresh data. The AI writes both functions. The dashboard provides:
-
-- A `<div class="panel-body">` container (the canvas to work with)
-- A `state` object with real-time data
-- Utility functions (`drawSparkline`, `drawHeatmap`, `sizeCanvas`)
-- CSS variable access to the design system (colors, fonts, spacing)
-- Full DOM/Canvas/SVG API access
-
-### 12.2 Display Module Contract
+### 12.1 Display Module Structure
 
 ```javascript
 // display.js for <ID>: <Name>
-// Dashboard visualization module — full AI-authored rendering
+// Dashboard render module — declares layout, formatting, and visualization
 export default {
-  // ── Metadata (required) ────────────────────────────────────
   id: '<ID>',
   name: '<Human Name>',
   version: 1,
 
-  // ── Data Contract (required) ───────────────────────────────
-  channels: ['ppg', 'accel'],       // Sensor channels this algo reads
-  tier: 0,                          // 0-3
-  classification: 'wellness',       // wellness | health-indicator | health-screening | sport-performance
-  unit: 'BPM',                      // Output unit
-  range: [30, 220],                 // Valid output range [min, max]
-  size: '1x1',                      // Panel size: '1x1' | '2x1' | '2x2'
+  // ─── Layout Type ──────────────────────────────────
+  // Determines the dashboard panel structure
+  layout: '<type>',  // see §12.2
 
-  // ── Parameters (optional) ─────────────────────────────────
-  params: [
-    { name: 'Bandpass Low', min: 0.3, max: 1.0, default: 0.5, step: 0.1, unit: 'Hz' },
+  // ─── Primary Display ──────────────────────────────
+  primary: {
+    type: 'number',      // 'number' | 'waveform' | 'gauge' | 'status' | 'bar'
+    label: '<Label>',
+    unit: '<unit>',
+    decimals: 0,
+    range: [min, max],
+    // Optional: color zones for gauge/number
+    zones: [
+      { min: 0, max: 30, color: '#ef4444', label: 'Low' },
+      { min: 30, max: 60, color: '#f59e0b', label: 'Moderate' },
+      { min: 60, max: 100, color: '#22c55e', label: 'Good' },
+    ],
+  },
+
+  // ─── Secondary Displays ───────────────────────────
+  // Additional info shown alongside primary (SQI, sub-metrics, etc.)
+  secondary: [
+    { type: 'sqi-bar', label: 'Signal Quality' },
+    // { type: 'number', key: 'rmssd', label: 'RMSSD', unit: 'ms', decimals: 1 },
+    // { type: 'status', key: 'state', label: 'State' },
   ],
 
-  // ── Scoped CSS (optional) ─────────────────────────────────
-  // Injected into <head> once. Use [data-algo-id="<ID>"] to scope.
-  css: `
-    [data-algo-id="<ID>"] .my-gauge { /* styles */ }
-  `,
-
-  // ── render(container, state) — REQUIRED ────────────────────
-  // Called ONCE when the panel opens. Build the entire panel body.
-  // 'container' is an empty <div class="panel-body">.
-  // Use innerHTML, createElement, canvas, SVG — whatever the visualization needs.
-  render(container, state) {
-    container.innerHTML = `
-      <div class="my-gauge">
-        <div class="my-value">--</div>
-        <canvas class="my-chart" width="300" height="80"></canvas>
-      </div>
-    `;
-    // Size canvases for retina
-    state.util.sizeCanvas(container.querySelector('.my-chart'));
+  // ─── Chart Configuration ──────────────────────────
+  chart: {
+    type: 'line',         // 'line' | 'bar' | 'scatter' | 'segments' | 'none'
+    windowSeconds: 60,    // How much history to show
+    yRange: [min, max],   // Y-axis range (matches output valid range)
   },
 
-  // ── update(container, state) — REQUIRED ────────────────────
-  // Called on EVERY sensor tick (~10 Hz in simulation, variable on hardware).
-  // Update DOM elements, redraw canvases, animate transitions.
-  update(container, state) {
-    container.querySelector('.my-value').textContent = Math.round(state.output);
-    state.util.drawSparkline(
-      container.querySelector('.my-chart'),
-      state.history,
-      '#6366f1'
-    );
-  },
+  // ─── Card Size ────────────────────────────────────
+  size: '1x1',  // '1x1' | '2x1' | '2x2' | '1x2'
 
-  // ── destroy(container) — optional ──────────────────────────
-  // Called when the panel closes. Clean up intervals, observers, etc.
-  destroy(container) {},
+  // ─── Classification Badge ─────────────────────────
+  classification: '<wellness|health-indicator|health-screening|sport-performance>',
+
+  // ─── Channels Required ────────────────────────────
+  channels: ['ppg', 'accel'],  // For the dashboard to check sensor availability
+
+  // ─── Tier ─────────────────────────────────────────
+  tier: 0,  // 0-3
+
+  // ─── Parameters (tunable in dev dashboard) ────────
+  params: [
+    { name: 'Param Name', min: 0, max: 10, default: 5, step: 0.1, unit: 'Hz' },
+  ],
 };
 ```
 
-### 12.3 State Object
+### 12.2 Layout Type Selection
 
-The `state` object passed to `render()` and `update()`:
+The layout type is determined by the algorithm category and output type:
+
+| Algorithm Produces | Layout Type | Description |
+|---|---|---|
+| Single real-time vital sign (HR, SpO2, temp, EDA) | `gauge` | Big number + arc gauge with color zones + line chart |
+| Waveform analysis (ECG shape, PPG morphology) | `waveform` | Real-time scrolling waveform + feature annotations |
+| Score (0–100) (recovery, sleep, strain) | `score` | Circular gauge with gradient + score breakdown |
+| Cumulative counter (steps, calories, reps) | `counter` | Big number + daily bar chart + goal indicator |
+| Multi-metric sport technique | `multi-metric` | Multiple sub-scores in grid + event timeline |
+| Time-series / trend (temp baseline, EDA timeline) | `timeline` | Time-series chart with baseline band + deviation markers |
+| Sleep phases | `phases` | Segmented horizontal bar (Wake/Light/Deep/REM) + summary |
+| Event detection (snoring, workout, arrhythmia) | `event-log` | Event list with timestamps + summary statistics |
+| Boolean / state (sleep detected, workout active) | `status` | Status badge (Active/Inactive) + duration timer |
+
+### 12.3 Automatic Layout Assignment
+
+When generating `display.js`, select the layout type based on this cascade:
+
+1. If spec `Output.Unit` is BPM, %, °C, mmHg, µS → `gauge`
+2. If spec `Output.Unit` is `score` and range is [0, 100] → `score`
+3. If spec `Output.Unit` is `steps`, `kcal`, `reps` → `counter`
+4. If spec `Output.Unit` is empty and range is [0, 1] (boolean) → `status`
+5. If spec mentions "waveform" or "morphology" → `waveform`
+6. If spec mentions "phases" or "stages" → `phases`
+7. If spec mentions "events" or "detection" and output is episodic → `event-log`
+8. If category is `sport-motion` and has multiple sub-outputs → `multi-metric`
+9. If spec tier is 3 and metric is trended → `timeline`
+10. Default → `gauge`
+
+### 12.4 Multi-Metric and Score Breakdown Layouts
+
+**For algorithms with multiple output metrics** (sport technique, composite scores), extend the display module:
 
 ```javascript
-{
-  output: 72.3,             // Primary value (clamped to algo.range)
-  sqi: 0.85,                // Signal quality index (0.0–1.0)
-  history: [72, 73, ...],   // Output history array (max ~300 points)
-  sensorData: {             // Raw sensor data per channel
-    ppg: {
-      latest: 0.54,         // Most recent sample
-      online: true,          // Whether sensor is streaming
-      history: [0.51, ...], // Raw sample history
-    },
-  },
-  elapsed: 12345,           // Milliseconds since algo started
-  params: {                 // Current parameter values
-    'Bandpass Low': 0.5,
-  },
-  algo: {                   // Algorithm metadata
-    id: 'A01', name: 'Heart Rate', unit: 'BPM', range: [30, 220],
-  },
-  util: {                   // Dashboard utility functions
-    drawSparkline(canvas, data, color),  // Line chart with gradient fill
-    drawHeatmap(canvas, data, rows, cols), // Grid heatmap (data = flat array of 0..1)
-    sizeCanvas(canvas),                  // Retina-aware canvas sizing
-  },
-}
+// Multi-metric layout — for algorithms producing 2+ values
+metrics: [
+  { key: "cadence",   label: "Cadence",       unit: "spm", range: [120, 200] },
+  { key: "gct",       label: "Ground Contact", unit: "ms",  range: [180, 300] },
+  { key: "vertOsc",   label: "Vert. Osc.",    unit: "cm",  range: [5, 15] },
+],
+primary: "cadence",   // Which metric drives the main display number
 ```
 
-### 12.4 Design System Variables
+**For composite scores** (recovery, sleep score, biological age), declare the score breakdown:
 
-Available CSS custom properties (dark theme defaults shown):
-
-```
---bg-0: #0a0a0f     --text-1: #e8e8f0    --accent: #6366f1
---bg-1: #12121a     --text-2: #a0a0b8    --green: #22c55e
---bg-2: #1a1a26     --text-3: #6a6a82    --red: #ef4444
---surface-1: #2a2a38  --orange: #f59e0b   --cyan: #06b6d4
---surface-2: #32323f  --pink: #ec4899     --purple: #a855f7
---font-mono: 'JetBrains Mono', monospace
---font-sans: 'Inter', system-ui, sans-serif
---radius-sm: 4px     --radius: 8px
+```javascript
+// Score breakdown — for composite algorithms producing a weighted score
+breakdown: [
+  { key: "hrv",    label: "HRV",           weight: 0.30 },
+  { key: "sleep",  label: "Sleep Quality",  weight: 0.25 },
+  { key: "rhr",    label: "Resting HR",     weight: 0.25 },
+  { key: "strain", label: "Prior Strain",   weight: 0.20 },
+],
 ```
 
-### 12.5 Visualization Guidelines
+The dashboard renders breakdowns as a stacked bar or radar chart. Each sub-metric maps to a sub-algorithm's output.
 
-**The AI decides what visualization to build.** There are no mandatory layout types. Design the visualization to best communicate what the algorithm produces. Examples of what's possible:
-
-| Algorithm Type | Visualization Ideas |
-|---|---|
-| Real-time vital (HR, SpO2, temp) | Big number + color-coded zone arc + sparkline |
-| Waveform morphology (ECG, PPG) | Scrolling real-time waveform + feature markers |
-| Composite score (recovery, sleep) | Circular score ring + weighted breakdown bars |
-| Cumulative counter (steps, kcal) | Large counter + delta badge + bar chart |
-| Body composition (fat %, muscle) | Multi-metric grid + radar/spider chart |
-| Trend analysis (temp baseline) | Time-series with baseline band + deviation markers |
-| Sleep phases | Segmented horizontal phase bar + hypnogram |
-| Event detection (snoring, arrhythmia) | Event list with timestamps + count badge |
-| Sport technique (running, tennis) | Custom court/track heatmap + zone annotations |
-| Vascular/cardiac | Pressure waveform + systolic/diastolic markers |
-| Stress/autonomic | Dual-axis chart (sympathetic vs parasympathetic) |
-| Boolean state (workout active) | Large status icon + duration timer + threshold bar |
-
-**These are suggestions, not constraints.** The AI can invent entirely new visualizations — radar charts, 3D projections, animated gauges, court diagrams, body maps, frequency spectrograms, Poincaré plots, whatever best serves the data.
-
-### 12.6 Best Practices
-
-1. **Match visualization to data semantics.** A heart rate deserves a gauge with zones. A tennis stroke pattern deserves a court heatmap. A sleep algorithm deserves a hypnogram. Let the data drive the design.
-
-2. **Use Canvas for complex/animated graphics** (waveforms, heatmaps, charts, custom shapes). Use DOM for text/labels/badges. Use SVG for simple vector graphics (gauges, rings, icons).
-
-3. **Performance:** `update()` is called ~10 Hz. Keep it fast. Avoid innerHTML in update — mutate existing elements. Use `requestAnimationFrame` for heavy canvas work.
-
-4. **Responsive:** The panel body width varies (280–560px depending on `size`). Use percentages, flexbox, or grid. Size canvases with `state.util.sizeCanvas()`.
-
-5. **Scope CSS** with `[data-algo-id="<ID>"]` to avoid style leaks between panels.
-
-6. **Graceful degradation:** Handle `state.output === 0`, `state.history.length === 0`, and `state.sqi === 0` (initial state before data flows).
-
-7. **Color zones:** If the algorithm has meaningful ranges (normal/elevated/high), encode them as color transitions in the visualization.
-
-8. **SQI indicator:** Always show signal quality somewhere — a mini bar, arc gauge, or color tint. Users need to know if the data is trustworthy.
-
-### 12.7 Generation Rules
-
-When generating `display.js`:
-
-1. **Read the spec** — the Output section defines what to visualize (unit, range, update rate). The Algorithm section reveals what intermediate data is interesting. The Display section in the spec provides hints.
-
-2. **Write `render()`** — build the full panel body DOM. Create all elements that `update()` will mutate. Initialize canvases. Show placeholder values ("--", empty charts).
-
-3. **Write `update()`** — update values, redraw charts, animate transitions. Access data via `state.output`, `state.sqi`, `state.history`, `state.sensorData`.
-
-4. **Write `css`** — scope everything with `[data-algo-id="<ID>"]`. Use design system variables for colors/fonts. Keep styles minimal and dark-theme compatible.
-
-5. **Set `size`** — Use `'1x1'` for single-metric algorithms. Use `'2x1'` for waveforms or multi-metric. Use `'2x2'` for complex dashboards with multiple charts.
-
-6. **Keep it self-contained.** The display module must not import external libraries or make network requests. It has access to: DOM API, Canvas API, SVG, CSS, and the utility functions on `state.util`.
-
-7. **Test mentally:** Imagine the panel at 0 seconds (no data), at 5 seconds (data flowing), and at 5 minutes (history full). Does it look good in all three states?
+**Rule:** If the algorithm has more than one output metric, use `metrics[]` array. If it's a composite score, also include `breakdown[]`. The `primary` field selects which metric is shown as the headline number.
 
 ---
 
@@ -1383,13 +1283,12 @@ Algorithms are hardware-agnostic. Declare ONLY the abstract data channels — NE
 - **Zero/null means**: <what 0 or "--" indicates>
 
 ## Display
-- **Visualization Concept**: <1–2 sentence description of what the panel should look like>
-- **Primary Metric**: <label>, <unit>, <range>
-- **Secondary Info**: <what else to show (SQI, sub-metrics, state, zones, etc.)>
-- **Chart/Canvas**: <what graphical element to include (sparkline, waveform, heatmap, radar, etc.)>
-- **Card Size**: <1x1 | 2x1 | 2x2>
-- **Color Zones** (optional): [{ min, max, color, label }, ...]
-- **Warmup Duration** (optional): <time before first valid output>
+- **Layout**: <gauge | waveform | score | counter | multi-metric | timeline | phases | event-log | status>
+- **Primary**: <type>, <label>, <unit>, <decimals>, <range>
+- **Zones** (optional): [{ min, max, color, label }, ...]
+- **Secondary**: [SQI bar, sub-metrics, state badge, ...]
+- **Chart**: <line|bar|scatter|segments|none>, <window seconds>
+- **Card Size**: <1x1 | 2x1 | 2x2 | 1x2>
 
 ## Edge Cases
 | Condition | Behavior |

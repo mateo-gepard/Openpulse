@@ -69,48 +69,46 @@ public:
 
     void writeScalar(ChannelID ch, float value) {
         uint8_t idx = (uint8_t)ch;
-        if (!chars_[idx] || !isConnected()) return;
+        if (!chars_[idx] || !connected_) return;
         chars_[idx]->writeValue(&value, 4);
-        spacedPoll();
     }
 
     void writeVec3(ChannelID ch, float x, float y, float z) {
         uint8_t idx = (uint8_t)ch;
-        if (!chars_[idx] || !isConnected()) return;
+        if (!chars_[idx] || !connected_) return;
         uint8_t buf[12];
         memcpy(buf, &x, 4);
         memcpy(buf + 4, &y, 4);
         memcpy(buf + 8, &z, 4);
         chars_[idx]->writeValue(buf, 12);
-        spacedPoll();
     }
 
     // ─── Connection ───────────────────────────────────────────
 
-    void poll() { BLE.poll(); }
-
-    bool isConnected() {
+    // Call once per loop iteration — updates connection state and processes BLE events
+    void poll() {
+        BLE.poll();
         BLEDevice central = BLE.central();
-        bool connected = central && central.connected();
-        if (connected && !wasConnected_) {
+        connected_ = central && central.connected();
+        if (connected_ && !wasConnected_) {
             wasConnected_ = true;
             Serial.println(F("[BLE] Central connected"));
-        } else if (!connected && wasConnected_) {
+        } else if (!connected_ && wasConnected_) {
             wasConnected_ = false;
             Serial.println(F("[BLE] Disconnected — re-advertising"));
             BLE.advertise();
         }
-        return connected;
     }
+
+    bool isConnected() const { return connected_; }
 
     uint8_t characteristicCount() const { return charCount_; }
 
 private:
     SensorConfig cfg_ = {};
     bool wasConnected_ = false;
+    bool connected_ = false;
     uint8_t charCount_ = 0;
     BLEService service_{OP_SERVICE_UUID};
     BLECharacteristic* chars_[(uint8_t)ChannelID::CHANNEL_COUNT] = {};
-
-    void spacedPoll() { delay(5); BLE.poll(); }
 };

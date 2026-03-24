@@ -64,6 +64,22 @@ public:
     void update(uint32_t now_ms) override {
         if (status_ != DriverStatus::RUNNING) return;
 
+        // Check for overflow
+        uint8_t ovf = readReg(0x05);
+        if (ovf > 0) {
+            overflowCount_++;
+            // Clear FIFO and restart clean
+            writeReg(0x04, 0x00);
+            writeReg(0x05, 0x00);
+            writeReg(0x06, 0x00);
+            if (now_ms - lastDebug_ > 5000) {
+                lastDebug_ = now_ms;
+                Serial.print(F("  [MAX30102] FIFO overflow #"));
+                Serial.println(overflowCount_);
+            }
+            return;
+        }
+
         uint8_t wrPtr = readReg(0x04) & 0x1F;
         uint8_t rdPtr = readReg(0x06) & 0x1F;
         int available = (int)wrPtr - (int)rdPtr;
@@ -81,8 +97,8 @@ public:
             return;
         }
 
-        // Read up to 4 samples per call
-        int toRead = (available > 4) ? 4 : available;
+        // Drain all available samples (up to 16 per call to stay responsive)
+        int toRead = (available > 16) ? 16 : available;
         for (int i = 0; i < toRead; i++) {
             Wire.beginTransmission(0x57);
             Wire.write(0x07);  // FIFO data register
@@ -97,6 +113,24 @@ public:
 
                 ppgIR_  = (float)ir_raw;
                 ppgRed_ = (float)red_raw;
+
+                // Skin proximity detection: IR below threshold = no contact
+                bool onSkin = (ir_raw > SKIN_THRESHOLD);
+                if (onSkin != onSkin_) {
+                    onSkin_ = onSkin;
+                    Serial.print(F("  [MAX30102] Skin: "));
+                    Serial.println(onSkin ? F("ON") : F("OFF"));
+                    if (onSkin) {
+                        // Reset DC baselines on new contact
+                        dcIR_ = ppgIR_;
+                        dcRed_ = ppgRed_;
+                    }
+                }
+
+                if (!onSkin) {
+                    sample_ = { 0, now_ms, false };
+                    continue;
+                }
 
                 // DC baselines (EMA)
                 if (dcIR_ == 0) { dcIR_ = ppgIR_; dcRed_ = ppgRed_; }
@@ -115,6 +149,7 @@ public:
     DriverStatus getStatus() const override { return status_; }
     const char*  getName() const override   { return "MAX30102"; }
     uint8_t      getI2CAddress() const override { return 0x57; }
+    bool isSkinContact() const { return onSkin_; }
 
     SensorSample getLatest() const override { return sample_; }
 
@@ -142,6 +177,9 @@ public:
     }
 
 private:
+    // IR below this = no skin contact. 18-bit ADC, ~10k–50k is ambient, >50k is on-skin.
+    static constexpr uint32_t SKIN_THRESHOLD = 50000;
+
     DriverStatus status_ = DriverStatus::NOT_FOUND;
     SensorSample sample_ = {};
     float ppgIR_ = 0, ppgRed_ = 0;
@@ -149,6 +187,8 @@ private:
     float sampleRate_ = 100;
     uint32_t lastUpdate_ = 0;
     uint32_t lastDebug_ = 0;
+    uint32_t overflowCount_ = 0;
+    bool onSkin_ = false;
 
     void writeReg(uint8_t reg, uint8_t val) {
         Wire.beginTransmission(0x57);

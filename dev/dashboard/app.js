@@ -106,6 +106,141 @@ const CUSTOM_ALGOS = [];
 const SENSOR_DEFS = CHANNEL_DEFS;
 const SERVICE_UUID = OP_SERVICE_UUID;
 
+// ─── Display Configuration System ──────────────────────────
+// Assigns visual layout, zones, secondary metrics, warm-up, and size to every algorithm.
+// This drives the flexible panel renderer so each algo renders with the appropriate layout.
+
+const ALGO_LAYOUT_MAP = {
+  // Waveform — real-time scrolling signal
+  A05:'waveform', A07:'waveform',
+  // Score — composite scores with breakdown
+  C01:'score', C02:'score', C03:'score', X09:'score', X10:'score',
+  // Counter — cumulative numbers
+  A21:'counter', A24:'counter',
+  // Multi-metric — grid of values
+  A18:'multi-metric', A19:'multi-metric', X04:'multi-metric',
+  X16:'multi-metric', C04:'multi-metric', C05:'multi-metric', X12:'multi-metric',
+  // Timeline — long-term trend chart
+  A06:'timeline', A10:'timeline', A12:'timeline', A15:'timeline',
+  A17:'timeline', X08:'timeline', C10:'timeline',
+  // Phases — segmented state bar
+  A22:'phases', A23:'phases', X05:'phases', X11:'phases', X13:'phases',
+  // Event-log — detection events
+  A25:'event-log', A26:'event-log',
+  // Status — binary/alert state
+  A08:'status', A11:'status', A13:'status', X02:'status',
+  X06:'status', X07:'status', C06:'status', C07:'status', C08:'status', C09:'status',
+  // Everything else → gauge (default)
+};
+
+const ALGO_SIZE_MAP = {
+  A05:'2x1', A06:'2x1', A07:'2x1', A10:'2x1', A12:'2x1',
+  A15:'2x1', A17:'2x1', X08:'2x1', X11:'2x1',
+  C01:'2x1', C03:'2x1', C10:'2x1',
+};
+
+const ALGO_ZONE_MAP = {
+  A01:[{min:30,max:50,color:'#3b82f6',label:'Low'},{min:50,max:100,color:'#22c55e',label:'Normal'},{min:100,max:150,color:'#f59e0b',label:'Elevated'},{min:150,max:220,color:'#ef4444',label:'High'}],
+  A02:[{min:0,max:20,color:'#ef4444',label:'Low'},{min:20,max:50,color:'#22c55e',label:'Normal'},{min:50,max:100,color:'#f59e0b',label:'Elevated'},{min:100,max:300,color:'#3b82f6',label:'Athletic'}],
+  A03:[{min:70,max:90,color:'#ef4444',label:'Critical'},{min:90,max:94,color:'#f59e0b',label:'Low'},{min:94,max:100,color:'#22c55e',label:'Normal'}],
+  A04:[{min:4,max:12,color:'#22c55e',label:'Normal'},{min:12,max:20,color:'#f59e0b',label:'Elevated'},{min:20,max:60,color:'#ef4444',label:'High'}],
+  A06:[{min:40,max:50,color:'#3b82f6',label:'Athletic'},{min:50,max:65,color:'#22c55e',label:'Excellent'},{min:65,max:75,color:'#a3e635',label:'Good'},{min:75,max:100,color:'#ef4444',label:'Elevated'}],
+  A09:[{min:0,max:1,color:'#ef4444',label:'Low'},{min:1,max:5,color:'#f59e0b',label:'Moderate'},{min:5,max:20,color:'#22c55e',label:'Good'}],
+  A14:[{min:0,max:20,color:'#22c55e',label:'Calm'},{min:20,max:50,color:'#f59e0b',label:'Moderate'},{min:50,max:100,color:'#ef4444',label:'Stressed'}],
+  A16:[{min:0,max:40,color:'#ef4444',label:'Tense'},{min:40,max:70,color:'#f59e0b',label:'Moderate'},{min:70,max:100,color:'#22c55e',label:'Relaxed'}],
+  A20:[{min:0,max:40,color:'#ef4444',label:'Dehydrated'},{min:40,max:60,color:'#f59e0b',label:'Low'},{min:60,max:100,color:'#22c55e',label:'Hydrated'}],
+  A27:[{min:0,max:140,color:'#f59e0b',label:'Low'},{min:140,max:190,color:'#22c55e',label:'Optimal'},{min:190,max:240,color:'#ef4444',label:'High'}],
+  X01:[{min:60,max:90,color:'#3b82f6',label:'Low'},{min:90,max:120,color:'#22c55e',label:'Normal'},{min:120,max:140,color:'#f59e0b',label:'Elevated'},{min:140,max:250,color:'#ef4444',label:'High'}],
+  X14:[{min:0,max:30,color:'#ef4444',label:'Low'},{min:30,max:60,color:'#f59e0b',label:'Moderate'},{min:60,max:100,color:'#22c55e',label:'Resilient'}],
+  X17:[{min:0,max:5,color:'#22c55e',label:'Normal'},{min:5,max:15,color:'#f59e0b',label:'Mild'},{min:15,max:30,color:'#ef4444',label:'Moderate'},{min:30,max:60,color:'#dc2626',label:'Severe'}],
+  C01:[{min:0,max:33,color:'#ef4444',label:'Low'},{min:33,max:66,color:'#f59e0b',label:'Moderate'},{min:66,max:100,color:'#22c55e',label:'Recovered'}],
+  C02:[{min:0,max:7,color:'#22c55e',label:'Low'},{min:7,max:14,color:'#f59e0b',label:'Moderate'},{min:14,max:21,color:'#ef4444',label:'Overreaching'}],
+  C03:[{min:0,max:50,color:'#ef4444',label:'Poor'},{min:50,max:70,color:'#f59e0b',label:'Fair'},{min:70,max:85,color:'#22c55e',label:'Good'},{min:85,max:100,color:'#3b82f6',label:'Excellent'}],
+};
+
+const ALGO_SECONDARY_MAP = {
+  A01:[{key:'perfusion',label:'Perfusion',unit:'%'},{key:'ibi',label:'IBI',unit:'ms'}],
+  A02:[{key:'sdnn',label:'SDNN',unit:'ms'},{key:'pnn50',label:'pNN50',unit:'%'}],
+  A03:[{key:'rRatio',label:'R-Ratio',unit:''},{key:'perfusion',label:'Perf',unit:'%'}],
+  A04:[{key:'confidence',label:'Conf',unit:'%'}],
+  A06:[{key:'trend7d',label:'7d Trend',unit:'BPM/d'},{key:'baseline',label:'Baseline',unit:'BPM'}],
+  A07:[{key:'ri',label:'RI',unit:'%'},{key:'si',label:'SI',unit:'m/s'},{key:'aix',label:'AIx',unit:'%'}],
+  A09:[{key:'dcLevel',label:'DC',unit:'raw'},{key:'acAmp',label:'AC',unit:'raw'}],
+  A14:[{key:'tonic',label:'Tonic',unit:'µS'},{key:'scrCount',label:'SCRs',unit:'/min'}],
+  X01:[{key:'sbp',label:'SBP',unit:'mmHg'},{key:'dbp',label:'DBP',unit:'mmHg'},{key:'ptt',label:'PTT',unit:'ms'}],
+  X17:[{key:'ahi',label:'AHI',unit:''},{key:'odiCount',label:'ODI',unit:''}],
+};
+
+// Warmup durations in seconds — how long the algo needs before valid output
+const ALGO_WARMUP_MAP = {
+  A02:30,A04:15,A05:10,A06:604800,A07:10,A08:30,A10:86400,A11:86400,
+  A12:604800,A13:1209600,A14:15,A15:86400,A17:86400,A22:10,A23:300,
+  A25:5,A26:10,X01:10,X02:30,X04:30,X05:60,X06:60,X07:86400,
+  X08:86400,X09:86400,X10:86400,X11:3600,X12:604800,X13:604800,
+  X14:86400,X15:300,X16:86400,X17:3600,
+  C01:86400,C02:86400,C03:28800,C04:604800,C05:86400,C06:86400,
+  C07:28800,C08:604800,C09:1209600,C10:604800,
+};
+
+// Score breakdown definitions for composite algos
+const ALGO_BREAKDOWN_MAP = {
+  C01:[{key:'hrv',label:'HRV',weight:0.30},{key:'rhr',label:'Resting HR',weight:0.25},{key:'sleep',label:'Sleep',weight:0.25},{key:'strain',label:'Prior Strain',weight:0.20}],
+  C02:[{key:'hr',label:'Heart Rate',weight:0.40},{key:'duration',label:'Duration',weight:0.30},{key:'intensity',label:'Intensity',weight:0.30}],
+  C03:[{key:'duration',label:'Duration',weight:0.30},{key:'efficiency',label:'Efficiency',weight:0.25},{key:'restfulness',label:'Restfulness',weight:0.25},{key:'latency',label:'Latency',weight:0.20}],
+  X09:[{key:'hrv',label:'HRV',weight:0.35},{key:'rhr',label:'Resting HR',weight:0.30},{key:'temp',label:'Temperature',weight:0.20},{key:'activity',label:'Activity',weight:0.15}],
+  X10:[{key:'cardio',label:'Cardiovascular',weight:0.45},{key:'muscular',label:'Muscular',weight:0.30},{key:'thermal',label:'Thermal',weight:0.25}],
+};
+
+// Multi-metric definitions
+const ALGO_METRICS_MAP = {
+  A18:[{key:'bodyFat',label:'Body Fat',unit:'%',range:[3,60]},{key:'fatMass',label:'Fat Mass',unit:'kg',range:[1,100]},{key:'leanMass',label:'Lean Mass',unit:'kg',range:[20,100]}],
+  A19:[{key:'muscleMass',label:'Muscle Mass',unit:'kg',range:[10,100]},{key:'smm',label:'Skeletal MM',unit:'kg',range:[5,60]},{key:'bmi',label:'BMI',unit:'',range:[15,40]}],
+  X04:[{key:'co',label:'Cardiac Output',unit:'L/min',range:[2,12]},{key:'sv',label:'Stroke Vol',unit:'mL',range:[40,150]},{key:'svr',label:'SVR',unit:'dyn',range:[800,2000]}],
+  X16:[{key:'bodyFat',label:'Body Fat',unit:'%',range:[5,50]},{key:'metabolism',label:'Metabolism',unit:'kcal/d',range:[1200,3000]},{key:'fitness',label:'Fitness',unit:'score',range:[0,100]}],
+  C04:[{key:'bioAge',label:'Bio Age',unit:'yrs',range:[18,100]},{key:'delta',label:'Delta',unit:'yrs',range:[-20,20]},{key:'conf',label:'Confidence',unit:'%',range:[0,100]}],
+  C05:[{key:'cvAge',label:'CV Age',unit:'yrs',range:[18,100]},{key:'delta',label:'Delta',unit:'yrs',range:[-20,20]},{key:'pwv',label:'PWV',unit:'m/s',range:[4,20]}],
+  X12:[{key:'bioAge',label:'Bio Age',unit:'yrs',range:[18,100]},{key:'hrAge',label:'HR Age',unit:'yrs',range:[18,100]},{key:'actAge',label:'Activity Age',unit:'yrs',range:[18,100]}],
+};
+
+// Phase definitions for phase-type algos
+const ALGO_PHASES_MAP = {
+  A22:[{key:'still',label:'Still',color:'#6b7280'},{key:'walk',label:'Walking',color:'#22c55e'},{key:'run',label:'Running',color:'#f59e0b'},{key:'bike',label:'Cycling',color:'#3b82f6'},{key:'other',label:'Other',color:'#a855f7'}],
+  A23:[{key:'awake',label:'Awake',color:'#f59e0b'},{key:'sleep',label:'Asleep',color:'#6366f1'}],
+  X05:[{key:'symp',label:'Sympathetic',color:'#ef4444'},{key:'para',label:'Parasympathetic',color:'#22c55e'},{key:'balanced',label:'Balanced',color:'#3b82f6'}],
+  X11:[{key:'wake',label:'Wake',color:'#f59e0b'},{key:'light',label:'Light',color:'#60a5fa'},{key:'deep',label:'Deep',color:'#6366f1'},{key:'rem',label:'REM',color:'#a855f7'}],
+  X13:[{key:'earlyBird',label:'Morning',color:'#f59e0b'},{key:'intermediate',label:'Neither',color:'#22c55e'},{key:'nightOwl',label:'Evening',color:'#6366f1'}],
+};
+
+// Layout icon SVGs
+const LAYOUT_ICONS = {
+  gauge: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.5 0 10-4.5 10-10S17.5 2 12 2 2 6.5 2 12s4.5 10 10 10z"/><path d="M12 6v6l4 2"/></svg>',
+  waveform: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l3-9 4 18 3-9h4"/></svg>',
+  score: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+  counter: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>',
+  'multi-metric': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  timeline: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 4-8"/></svg>',
+  phases: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="5" height="10" rx="1"/><rect x="9" y="4" width="5" height="16" rx="1"/><rect x="16" y="9" width="5" height="6" rx="1"/></svg>',
+  'event-log': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  status: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  heatmap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><rect x="7" y="7" width="3" height="3" fill="currentColor" opacity="0.3"/><rect x="11" y="7" width="3" height="3" fill="currentColor" opacity="0.6"/><rect x="7" y="11" width="3" height="3" fill="currentColor" opacity="0.8"/><rect x="11" y="11" width="3" height="3" fill="currentColor" opacity="0.4"/></svg>',
+  canvas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',
+};
+
+// Assign display config to every algorithm in the registry
+ALGO_REGISTRY.forEach(algo => {
+  const layout = ALGO_LAYOUT_MAP[algo.id] || 'gauge';
+  algo.display = {
+    layout,
+    size: ALGO_SIZE_MAP[algo.id] || (layout === 'timeline' || layout === 'waveform' ? '2x1' : '1x1'),
+    zones: ALGO_ZONE_MAP[algo.id] || null,
+    secondary: ALGO_SECONDARY_MAP[algo.id] || [],
+    warmupSeconds: ALGO_WARMUP_MAP[algo.id] || 0,
+    breakdown: ALGO_BREAKDOWN_MAP[algo.id] || null,
+    metrics: ALGO_METRICS_MAP[algo.id] || null,
+    phases: ALGO_PHASES_MAP[algo.id] || null,
+  };
+});
+
 // ─── State ───────────────────────────────────────────────────
 let bleDevice = null, bleServer = null, isConnected = false;
 let pollingHandle = null, currentTheme = 'dark';
@@ -148,6 +283,8 @@ document.addEventListener('DOMContentLoaded', () => {
   $('#btn-clear-active').addEventListener('click', clearActivePane);
   initConsoleTabs();
   initSerialMonitor();
+  initCollapsibleSections();
+  initSimulation();
   $('#algo-search').addEventListener('input', e => { algoSearchText = e.target.value.toLowerCase(); renderAlgoList(); });
 
   $$('.filter-tab').forEach(btn => {
@@ -183,6 +320,14 @@ function initConsoleTabs() {
       e.stopPropagation();
       switchConsoleTab(tab.dataset.tab);
       if (!consoleIsExpanded) toggleConsole();
+    });
+  });
+}
+
+function initCollapsibleSections() {
+  $$('.sidebar-section-header[data-collapsible]').forEach(header => {
+    header.addEventListener('click', () => {
+      header.closest('.sidebar-section').classList.toggle('collapsed');
     });
   });
 }
@@ -426,17 +571,28 @@ async function connect() {
     setStatus('Connecting…');
     bleServer = await bleDevice.gatt.connect();
     logConsole('success', 'BLE', 'GATT connected');
-    const service = await bleServer.getPrimaryService(SERVICE_UUID);
+
+    logConsole('info', 'BLE', 'Discovering service…');
+    const service = await Promise.race([
+      bleServer.getPrimaryService(SERVICE_UUID),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Service discovery timeout (10s)')), 10000))
+    ]);
+    logConsole('success', 'BLE', 'Service discovered');
+
+    let subscribed = 0;
     for (const cdef of CHANNEL_DEFS) {
       try {
         chars[cdef.key] = await service.getCharacteristic(cdef.uuid);
         await chars[cdef.key].startNotifications();
         chars[cdef.key].addEventListener('characteristicvaluechanged', e => onCharChanged(cdef.key, e.target.value));
         logConsole('info', 'BLE', `Subscribed: ${cdef.name} (${cdef.key})`);
+        subscribed++;
       } catch (err) {
-        logConsole('warn', 'BLE', `Failed to subscribe: ${cdef.name} — ${err.message}`);
+        chars[cdef.key] = null;
+        logConsole('warn', 'BLE', `No characteristic: ${cdef.name}`);
       }
     }
+    logConsole('info', 'BLE', `${subscribed}/${CHANNEL_DEFS.length} channels active`);
     setConnected(true);
     connectionTime = Date.now();
     pollingHandle = setInterval(pollChars, 2500);
@@ -471,13 +627,16 @@ function onDisconnected() {
       if (isConnected) return;
       try {
         bleServer = await bleDevice.gatt.connect();
-        const service = await bleServer.getPrimaryService(SERVICE_UUID);
+        const service = await Promise.race([
+          bleServer.getPrimaryService(SERVICE_UUID),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000))
+        ]);
         for (const cdef of CHANNEL_DEFS) {
           try {
             chars[cdef.key] = await service.getCharacteristic(cdef.uuid);
             await chars[cdef.key].startNotifications();
             chars[cdef.key].addEventListener('characteristicvaluechanged', e => onCharChanged(cdef.key, e.target.value));
-          } catch (_) {}
+          } catch (_) { chars[cdef.key] = null; }
         }
         reconnectAttempts = 0;
         setConnected(true);
@@ -495,6 +654,7 @@ function onDisconnected() {
 async function pollChars() {
   if (!bleServer || !bleServer.connected) return;
   for (const [key, ch] of Object.entries(chars)) {
+    if (!ch) continue;
     try { const v = await ch.readValue(); onCharChanged(key, v); } catch (_) {}
   }
 }
@@ -526,7 +686,6 @@ function onCharChanged(key, dataView) {
     if (panel) updateRawVec3Panel(panel, key, x, y, z);
     // Feed algo panels
     updateAlgoPanelsWithSensor(key);
-    updateCustomAlgoPanelsWithSensor(key);
     return;
   }
 
@@ -543,7 +702,6 @@ function onCharChanged(key, dataView) {
   if (panel) updateRawPanel(panel, key, val);
   // Feed algo panels
   updateAlgoPanelsWithSensor(key);
-  updateCustomAlgoPanelsWithSensor(key);
 }
 
 // ─── Panel Management ────────────────────────────────────────
@@ -581,29 +739,94 @@ function toggleRawPanel(channelKey) {
 }
 
 function toggleAlgoPanel(algoId) {
-  const pid = 'algo-' + algoId;
+  const isCustom = CUSTOM_ALGOS.find(a => a.id === algoId);
+  const pid = (isCustom ? 'custom-' : 'algo-') + algoId;
   if (activePanels[pid]) { removePanel(pid); return; }
-  const algo = ALGO_REGISTRY.find(a => a.id === algoId);
+  const algo = isCustom || ALGO_REGISTRY.find(a => a.id === algoId);
   if (!algo) return;
 
+  const display = algo.display || { layout:'gauge', size:'1x1', zones:null, secondary:[], warmupSeconds:0 };
+  const layout = display.layout || 'gauge';
+  const channels = algo.sensors || algo.channels || [];
+
+  // Create panel element from template
   const tpl = $('#tpl-algo-panel');
   const clone = tpl.content.cloneNode(true);
   const el = clone.querySelector('.panel');
   el.dataset.panelId = pid;
-  el.querySelector('.panel-title').textContent = algo.id + ': ' + algo.name;
-  el.querySelector('.panel-subtitle').textContent = algo.layer + ' · tier ' + algo.tier;
-  el.querySelector('.algo-output-unit').textContent = algo.unit;
+  el.dataset.layout = layout;
 
-  // Meta tags
-  const metaRow = el.querySelector('.algo-meta-row');
+  // Panel sizing
+  if (display.size === '2x1') el.classList.add('panel-wide');
+  if (display.size === '2x2') el.classList.add('panel-wide', 'panel-tall');
+  if (isCustom) el.classList.add('custom-panel');
+
+  // Header
+  el.querySelector('.panel-title').textContent = algo.id + ': ' + algo.name;
+  el.querySelector('.panel-subtitle').textContent = layout + ' · ' + algo.layer + ' · T' + algo.tier;
+  const iconEl = el.querySelector('.panel-icon');
+  iconEl.innerHTML = LAYOUT_ICONS[layout] || LAYOUT_ICONS.gauge;
+  // Color icon per layout
+  const iconColors = { gauge:'algo-icon', waveform:'waveform-icon', score:'score-icon', counter:'counter-icon',
+    'multi-metric':'multi-icon', timeline:'timeline-icon', phases:'phases-icon',
+    'event-log':'eventlog-icon', status:'status-icon', heatmap:'heatmap-icon', canvas:'canvas-icon' };
+  iconEl.className = 'panel-icon ' + (iconColors[layout] || 'algo-icon');
+
+  // Build panel body based on layout
+  const body = el.querySelector('.panel-body');
+  body.innerHTML = '';
+
+  // ── Meta tags ──
+  const metaRow = document.createElement('div');
+  metaRow.className = 'algo-meta-row';
   metaRow.innerHTML = `
     <span class="algo-meta-tag ${algo.layer}">${algo.layer}</span>
-    <span class="algo-meta-tag ${algo.classification}">${algo.classification.replace('-',' ')}</span>`;
+    <span class="algo-meta-tag ${layout}">${layout.replace('-',' ')}</span>
+    <span class="algo-meta-tag ${algo.classification}">${(algo.classification||'wellness').replace('-',' ')}</span>
+    ${isCustom ? '<span class="algo-meta-tag custom">custom</span>' : ''}`;
+  body.appendChild(metaRow);
 
-  // Required sensors chips
-  const inputsList = el.querySelector('.algo-inputs-list');
-  const algoChannels = algo.sensors || algo.channels || [];
-  algoChannels.forEach(sk => {
+  // ── Warmup banner ──
+  if (display.warmupSeconds > 0) {
+    const warmBanner = document.createElement('div');
+    warmBanner.className = 'algo-warmup-banner';
+    warmBanner.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;flex-shrink:0"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      <span>Needs <strong>${formatWarmup(display.warmupSeconds)}</strong> of data before first valid output</span>`;
+    body.appendChild(warmBanner);
+  }
+
+  // ── Visualization: custom render() or built-in layout ──
+  if (algo.displayModule && typeof algo.displayModule.render === 'function') {
+    // Inject scoped CSS from display module if provided
+    if (algo.displayModule.css && !document.querySelector(`style[data-algo-css="${algo.id}"]`)) {
+      const styleEl = document.createElement('style');
+      styleEl.dataset.algoCss = algo.id;
+      styleEl.textContent = algo.displayModule.css;
+      document.head.appendChild(styleEl);
+    }
+    el.dataset.algoId = algo.id;
+    const renderState = {
+      output: 0, sqi: 0, history: [],
+      sensorData: {}, elapsed: 0, params: {},
+      algo: { id: algo.id, name: algo.name, unit: algo.unit, range: algo.range },
+      util: { drawSparkline, drawHeatmap, sizeCanvas },
+    };
+    try { algo.displayModule.render(body, renderState); } catch (err) {
+      body.innerHTML += `<div style="color:var(--red);font-size:11px;padding:8px;">render() error: ${err.message}</div>`;
+      logConsole('error', algo.id, 'render() failed: ' + err.message);
+    }
+  } else {
+    buildLayoutBody(body, layout, algo, display, channels);
+  }
+
+  // ── Sensor chips ──
+  const inputsSection = document.createElement('div');
+  inputsSection.className = 'algo-inputs-section';
+  inputsSection.innerHTML = '<div class="section-label">Required Sensors</div>';
+  const inputsList = document.createElement('div');
+  inputsList.className = 'algo-inputs-list';
+  channels.forEach(sk => {
     const sdef = SENSOR_DEFS.find(s => s.key === sk);
     const isAvail = sensorData[sk] && sensorData[sk].online;
     const chip = document.createElement('span');
@@ -611,9 +834,15 @@ function toggleAlgoPanel(algoId) {
     chip.innerHTML = `<span class="chip-dot"></span>${sdef ? sdef.name : sk}`;
     inputsList.appendChild(chip);
   });
+  inputsSection.appendChild(inputsList);
+  body.appendChild(inputsSection);
 
-  // Parameters
-  const paramsList = el.querySelector('.algo-params-list');
+  // ── Parameters ──
+  const paramsSection = document.createElement('div');
+  paramsSection.className = 'algo-params-section';
+  paramsSection.innerHTML = '<div class="section-label">Parameters <button class="btn-reset-params" title="Reset to defaults">↻</button></div>';
+  const paramsList = document.createElement('div');
+  paramsList.className = 'algo-params-list';
   const paramValues = {};
   if (algo.params && algo.params.length > 0) {
     algo.params.forEach(p => {
@@ -626,10 +855,10 @@ function toggleAlgoPanel(algoId) {
         <span class="param-value-display">${p.default}</span>
         <span class="param-unit">${p.unit}</span>`;
       const slider = row.querySelector('.param-slider');
-      const display = row.querySelector('.param-value-display');
+      const display2 = row.querySelector('.param-value-display');
       slider.addEventListener('input', () => {
         const v = parseFloat(slider.value);
-        display.textContent = v;
+        display2.textContent = v;
         paramValues[p.n] = v;
         logConsole('info', algo.id, `${p.n} = ${v} ${p.unit}`);
       });
@@ -638,14 +867,15 @@ function toggleAlgoPanel(algoId) {
   } else {
     paramsList.innerHTML = '<div style="color:var(--text-3);font-size:11px;padding:4px 0;">No tunable parameters</div>';
   }
+  paramsSection.appendChild(paramsList);
+  body.appendChild(paramsSection);
 
-  // Reset params button
-  el.querySelector('.btn-reset-params').addEventListener('click', () => {
+  // Reset params
+  paramsSection.querySelector('.btn-reset-params').addEventListener('click', () => {
     if (!algo.params) return;
     algo.params.forEach(p => {
       paramValues[p.n] = p.default;
-      const rows = paramsList.querySelectorAll('.param-row');
-      rows.forEach(r => {
+      paramsList.querySelectorAll('.param-row').forEach(r => {
         if (r.querySelector('.param-label').textContent === p.n) {
           r.querySelector('.param-slider').value = p.default;
           r.querySelector('.param-value-display').textContent = p.default;
@@ -655,7 +885,7 @@ function toggleAlgoPanel(algoId) {
     logConsole('info', algo.id, 'Parameters reset to defaults');
   });
 
-  // Start/stop button
+  // ── Start/Stop ──
   const toggleBtn = el.querySelector('.btn-algo-toggle');
   let running = false;
   toggleBtn.addEventListener('click', () => {
@@ -665,13 +895,17 @@ function toggleAlgoPanel(algoId) {
       badge.dataset.state = 'acquiring';
       badge.textContent = 'ACQUIRING';
       toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
-      logConsole('success', algo.id, 'Algorithm started');
-      // After a short delay, transition to VALID if sensors available
+      logConsole('success', algo.id, `Algorithm started [${layout}]`);
       setTimeout(() => {
         if (running && activePanels[pid]) {
-          const allAvail = algoChannels.every(sk => sensorData[sk] && sensorData[sk].online);
-          badge.dataset.state = allAvail ? 'valid' : 'low_quality';
-          badge.textContent = allAvail ? 'VALID' : 'LOW QUALITY';
+          const allAvail = channels.every(sk => sensorData[sk] && sensorData[sk].online);
+          if (display.warmupSeconds > 0) {
+            badge.dataset.state = 'warmup';
+            badge.textContent = 'WARMING UP';
+          } else {
+            badge.dataset.state = allAvail ? 'valid' : 'low_quality';
+            badge.textContent = allAvail ? 'VALID' : 'LOW QUALITY';
+          }
         }
       }, 2000);
     } else {
@@ -685,16 +919,383 @@ function toggleAlgoPanel(algoId) {
 
   el.querySelector('.btn-panel-close').addEventListener('click', () => removePanel(pid));
 
-  activePanels[pid] = { type: 'algo', algoId: algoId, element: el, algo, paramValues, running: false, history: [], algoChannels };
+  // ── Store panel state ──
+  activePanels[pid] = {
+    type: 'algo', algoId, element: el, algo, paramValues,
+    running: false, history: [], algoChannels: channels, layout,
+    metricHistories: {}, events: [], startTime: 0,
+  };
+  if (display.metrics) {
+    display.metrics.forEach(m => { activePanels[pid].metricHistories[m.key] = []; });
+  }
+
   showPanel(el);
   renderSensorList();
   renderAlgoList();
 
   requestAnimationFrame(() => {
-    const canvas = el.querySelector('.algo-waveform-canvas');
-    if (canvas) sizeCanvas(canvas);
+    el.querySelectorAll('canvas').forEach(c => sizeCanvas(c));
   });
 }
+
+// ─── Format warmup duration for display ─────────────────────
+function formatWarmup(sec) {
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.round(sec / 60) + ' minutes';
+  if (sec < 86400) return Math.round(sec / 3600) + ' hours';
+  return Math.round(sec / 86400) + ' days';
+}
+
+// ─── Layout Body Builders ───────────────────────────────────
+// Each layout type populates the panel body differently.
+
+function buildLayoutBody(body, layout, algo, display, channels) {
+  switch (layout) {
+    case 'gauge':      return buildGaugeBody(body, algo, display);
+    case 'waveform':   return buildWaveformBody(body, algo, display);
+    case 'score':      return buildScoreBody(body, algo, display);
+    case 'counter':    return buildCounterBody(body, algo, display);
+    case 'multi-metric': return buildMultiMetricBody(body, algo, display);
+    case 'timeline':   return buildTimelineBody(body, algo, display);
+    case 'phases':     return buildPhasesBody(body, algo, display);
+    case 'event-log':  return buildEventLogBody(body, algo, display);
+    case 'status':     return buildStatusBody(body, algo, display);
+    case 'heatmap':    return buildHeatmapBody(body, algo, display);
+    default:           return buildGaugeBody(body, algo, display);
+  }
+}
+
+// ── GAUGE: big number + zone bar + SQI + sparkline ──
+function buildGaugeBody(body, algo, display) {
+  // Zone bar
+  if (display.zones && display.zones.length > 0) {
+    const zoneBar = document.createElement('div');
+    zoneBar.className = 'algo-zone-bar';
+    const track = document.createElement('div');
+    track.className = 'zone-bar-track';
+    const full = algo.range[1] - algo.range[0];
+    display.zones.forEach(z => {
+      const seg = document.createElement('div');
+      seg.className = 'zone-bar-segment';
+      seg.style.background = z.color;
+      seg.style.flex = ((z.max - z.min) / full);
+      seg.title = z.label;
+      track.appendChild(seg);
+    });
+    zoneBar.appendChild(track);
+    const needle = document.createElement('div');
+    needle.className = 'zone-bar-needle';
+    zoneBar.appendChild(needle);
+    const labels = document.createElement('div');
+    labels.className = 'zone-bar-labels';
+    display.zones.forEach(z => {
+      const l = document.createElement('span');
+      l.textContent = z.label;
+      l.style.color = z.color;
+      labels.appendChild(l);
+    });
+    zoneBar.appendChild(labels);
+    body.appendChild(zoneBar);
+  }
+
+  // Top row: big number + SQI
+  body.appendChild(buildTopRow(algo));
+
+  // Secondary metrics
+  if (display.secondary && display.secondary.length > 0) {
+    body.appendChild(buildSecondaryRow(display.secondary));
+  }
+
+  // Sparkline
+  body.appendChild(buildSparklineSection());
+}
+
+// ── WAVEFORM: metrics strip + large scrolling canvas ──
+function buildWaveformBody(body, algo, display) {
+  // Small metrics strip at top
+  if (display.secondary && display.secondary.length > 0) {
+    const strip = document.createElement('div');
+    strip.className = 'algo-metrics-strip';
+    display.secondary.forEach(m => {
+      strip.innerHTML += `<div class="strip-metric"><span class="strip-val" data-key="${m.key}">--</span><span class="strip-lbl">${m.label}</span><span class="strip-unit">${m.unit}</span></div>`;
+    });
+    body.appendChild(strip);
+  }
+
+  // Large waveform canvas
+  const wfSection = document.createElement('div');
+  wfSection.className = 'algo-waveform-section waveform-large';
+  wfSection.innerHTML = '<canvas class="algo-waveform-canvas"></canvas>';
+  body.appendChild(wfSection);
+
+  // SQI small
+  const sqiRow = document.createElement('div');
+  sqiRow.className = 'algo-sqi-row';
+  sqiRow.innerHTML = '<span class="sqi-mini-label">SQI</span><div class="sqi-mini-bar"><div class="sqi-mini-fill"></div></div><span class="sqi-mini-val">--</span>';
+  body.appendChild(sqiRow);
+}
+
+// ── SCORE: ring gauge + breakdown bars ──
+function buildScoreBody(body, algo, display) {
+  // Score ring
+  const scoreTop = document.createElement('div');
+  scoreTop.className = 'algo-score-top';
+  scoreTop.innerHTML = `
+    <div class="score-ring">
+      <svg viewBox="0 0 120 120" class="score-ring-svg">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="var(--surface-2)" stroke-width="10"/>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="var(--accent)" stroke-width="10" class="score-ring-arc"
+          stroke-dasharray="327" stroke-dashoffset="327" stroke-linecap="round" transform="rotate(-90 60 60)"/>
+      </svg>
+      <div class="score-ring-center">
+        <div class="algo-output-value">--</div>
+        <div class="algo-output-unit">${algo.unit}</div>
+      </div>
+    </div>`;
+  body.appendChild(scoreTop);
+
+  // Breakdown bars
+  if (display.breakdown && display.breakdown.length > 0) {
+    const bkSection = document.createElement('div');
+    bkSection.className = 'algo-breakdown-section';
+    bkSection.innerHTML = '<div class="section-label">Score Breakdown</div>';
+    const bars = document.createElement('div');
+    bars.className = 'breakdown-bars';
+    display.breakdown.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'breakdown-row';
+      row.innerHTML = `
+        <span class="breakdown-label">${b.label}</span>
+        <div class="breakdown-track"><div class="breakdown-fill" data-key="${b.key}" style="width:0%"></div></div>
+        <span class="breakdown-weight">${(b.weight * 100).toFixed(0)}%</span>
+        <span class="breakdown-value" data-key="${b.key}">--</span>`;
+      bars.appendChild(row);
+    });
+    bkSection.appendChild(bars);
+    body.appendChild(bkSection);
+  }
+
+  // Small sparkline
+  body.appendChild(buildSparklineSection('sparkline-sm'));
+}
+
+// ── COUNTER: big integer + delta badge + bar chart ──
+function buildCounterBody(body, algo, display) {
+  const topRow = document.createElement('div');
+  topRow.className = 'algo-top-row counter-top';
+  topRow.innerHTML = `
+    <div class="algo-output-section">
+      <div class="algo-output-value counter-value">0</div>
+      <div class="algo-output-unit">${algo.unit}</div>
+    </div>
+    <div class="counter-delta-badge">
+      <span class="delta-arrow">↑</span>
+      <span class="delta-value">0</span>
+      <span class="delta-period">/min</span>
+    </div>`;
+  body.appendChild(topRow);
+
+  // Bar chart area
+  const chartSection = document.createElement('div');
+  chartSection.className = 'algo-waveform-section';
+  chartSection.innerHTML = '<canvas class="algo-waveform-canvas"></canvas>';
+  body.appendChild(chartSection);
+}
+
+// ── MULTI-METRIC: grid of metric cards ──
+function buildMultiMetricBody(body, algo, display) {
+  const grid = document.createElement('div');
+  grid.className = 'algo-metrics-grid';
+  const metrics = display.metrics || [{key:'value',label:algo.name,unit:algo.unit,range:algo.range}];
+  metrics.forEach(m => {
+    const cell = document.createElement('div');
+    cell.className = 'metric-cell';
+    cell.dataset.metricKey = m.key;
+    cell.innerHTML = `
+      <div class="metric-value" data-key="${m.key}">--</div>
+      <div class="metric-label">${m.label}</div>
+      <div class="metric-unit">${m.unit}</div>`;
+    grid.appendChild(cell);
+  });
+  body.appendChild(grid);
+
+  // SQI row
+  body.appendChild(buildSQIRow());
+
+  // Sparkline
+  body.appendChild(buildSparklineSection('sparkline-sm'));
+}
+
+// ── TIMELINE: big number + wide time-series chart ──
+function buildTimelineBody(body, algo, display) {
+  body.appendChild(buildTopRow(algo));
+
+  if (display.secondary && display.secondary.length > 0) {
+    body.appendChild(buildSecondaryRow(display.secondary));
+  }
+
+  // Wide chart
+  const chartSection = document.createElement('div');
+  chartSection.className = 'algo-waveform-section timeline-chart';
+  chartSection.innerHTML = '<canvas class="algo-waveform-canvas"></canvas>';
+  body.appendChild(chartSection);
+}
+
+// ── PHASES: current phase badge + segmented bar + legend ──
+function buildPhasesBody(body, algo, display) {
+  const phases = display.phases || [{key:'unknown',label:'Unknown',color:'#6b7280'}];
+
+  // Current phase badge
+  const phaseTop = document.createElement('div');
+  phaseTop.className = 'algo-phase-top';
+  phaseTop.innerHTML = `
+    <div class="phase-current-badge" style="background:${phases[0].color}20;color:${phases[0].color};border:1px solid ${phases[0].color}40">
+      <span class="phase-dot" style="background:${phases[0].color}"></span>
+      <span class="phase-current-label">${phases[0].label}</span>
+    </div>
+    <div class="phase-duration">--</div>`;
+  body.appendChild(phaseTop);
+
+  // Phase bar (segmented)
+  const phaseBar = document.createElement('div');
+  phaseBar.className = 'algo-phase-bar';
+  const barTrack = document.createElement('div');
+  barTrack.className = 'phase-bar-track';
+  phaseBar.appendChild(barTrack);
+  body.appendChild(phaseBar);
+
+  // Legend
+  const legend = document.createElement('div');
+  legend.className = 'algo-phase-legend';
+  phases.forEach(p => {
+    legend.innerHTML += `<span class="phase-legend-item"><span class="phase-legend-dot" style="background:${p.color}"></span>${p.label}</span>`;
+  });
+  body.appendChild(legend);
+
+  // SQI
+  body.appendChild(buildSQIRow());
+}
+
+// ── EVENT-LOG: event count + scrolling event list ──
+function buildEventLogBody(body, algo, display) {
+  // Event summary
+  const summary = document.createElement('div');
+  summary.className = 'algo-event-summary';
+  summary.innerHTML = `
+    <div class="event-count-big"><span class="event-count-num">0</span><span class="event-count-label">events detected</span></div>
+    <div class="event-last-time">Last: --</div>`;
+  body.appendChild(summary);
+
+  // Event list
+  const listSection = document.createElement('div');
+  listSection.className = 'algo-event-list';
+  listSection.innerHTML = '<div class="event-list-empty">No events yet</div>';
+  body.appendChild(listSection);
+
+  // SQI
+  body.appendChild(buildSQIRow());
+}
+
+// ── STATUS: icon + status text + threshold bar ──
+function buildStatusBody(body, algo, display) {
+  const statusTop = document.createElement('div');
+  statusTop.className = 'algo-status-top';
+  statusTop.innerHTML = `
+    <div class="status-icon-big">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:32px;height:32px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <div class="status-text-big">INACTIVE</div>
+    <div class="status-sub-text">${algo.name}</div>`;
+  body.appendChild(statusTop);
+
+  // Threshold bar (if algo has simple range)
+  if (algo.range[1] !== 1) {
+    const bar = document.createElement('div');
+    bar.className = 'algo-status-bar';
+    bar.innerHTML = `
+      <div class="status-bar-track"><div class="status-bar-fill"></div></div>
+      <div class="status-bar-labels"><span>${algo.range[0]}</span><span>${algo.unit}</span><span>${algo.range[1]}</span></div>`;
+    body.appendChild(bar);
+  }
+
+  // Sparkline
+  body.appendChild(buildSparklineSection('sparkline-sm'));
+}
+
+// ── HEATMAP: canvas + legend + metrics ──
+function buildHeatmapBody(body, algo, display) {
+  if (display.secondary && display.secondary.length > 0) {
+    body.appendChild(buildSecondaryRow(display.secondary));
+  }
+
+  const heatSection = document.createElement('div');
+  heatSection.className = 'algo-heatmap-section';
+  heatSection.innerHTML = '<canvas class="algo-heatmap-canvas"></canvas>';
+  body.appendChild(heatSection);
+
+  // Legend gradient
+  const legend = document.createElement('div');
+  legend.className = 'heatmap-legend';
+  legend.innerHTML = '<span>Low</span><div class="heatmap-gradient"></div><span>High</span>';
+  body.appendChild(legend);
+}
+
+// ─── Shared body-building helpers ───────────────────────────
+
+function buildTopRow(algo) {
+  const topRow = document.createElement('div');
+  topRow.className = 'algo-top-row';
+  topRow.innerHTML = `
+    <div class="algo-output-section">
+      <div class="algo-output-value">--</div>
+      <div class="algo-output-unit">${algo.unit}</div>
+    </div>
+    <div class="algo-sqi-section">
+      <div class="sqi-gauge">
+        <svg viewBox="0 0 100 60" class="sqi-svg">
+          <path d="M10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--surface-3)" stroke-width="8" stroke-linecap="round"/>
+          <path d="M10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" class="sqi-arc" stroke-dasharray="126" stroke-dashoffset="126"/>
+        </svg>
+        <div class="sqi-label">
+          <span class="sqi-value">--</span>
+          <span class="sqi-text">SQI</span>
+        </div>
+      </div>
+    </div>`;
+  return topRow;
+}
+
+function buildSecondaryRow(secondaryDefs) {
+  const row = document.createElement('div');
+  row.className = 'algo-secondary-row';
+  secondaryDefs.forEach(m => {
+    const card = document.createElement('div');
+    card.className = 'secondary-card';
+    card.innerHTML = `
+      <span class="secondary-val" data-key="${m.key}">--</span>
+      <span class="secondary-label">${m.label}</span>
+      ${m.unit ? `<span class="secondary-unit">${m.unit}</span>` : ''}`;
+    row.appendChild(card);
+  });
+  return row;
+}
+
+function buildSparklineSection(extraClass) {
+  const section = document.createElement('div');
+  section.className = 'algo-waveform-section' + (extraClass ? ' ' + extraClass : '');
+  section.innerHTML = '<canvas class="algo-waveform-canvas"></canvas>';
+  return section;
+}
+
+function buildSQIRow() {
+  const row = document.createElement('div');
+  row.className = 'algo-sqi-row';
+  row.innerHTML = '<span class="sqi-mini-label">SQI</span><div class="sqi-mini-bar"><div class="sqi-mini-fill"></div></div><span class="sqi-mini-val">--</span>';
+  return row;
+}
+
+// Keep legacy name for backward compat with sidebar click handler
+function toggleCustomAlgoPanel(algoId) { toggleAlgoPanel(algoId); }
 
 function removePanel(pid) {
   const p = activePanels[pid];
@@ -776,7 +1377,7 @@ function updateRawVec3Panel(panel, key, x, y, z) {
   drawVec3Sparkline(canvas, sensorData[key+'X'].history, sensorData[key+'Y'].history, sensorData[key+'Z'].history);
 }
 
-// ─── Algo Panel Sensor Feed ──────────────────────────────────
+// ─── Algo Panel Sensor Feed (unified for all layouts) ────────
 function updateAlgoPanelsWithSensor(sensorKey) {
   Object.values(activePanels).forEach(p => {
     if (p.type !== 'algo') return;
@@ -785,37 +1386,212 @@ function updateAlgoPanelsWithSensor(sensorKey) {
     const badge = p.element.querySelector('.algo-state-badge');
     if (!badge || badge.dataset.state === 'idle') return;
 
-    // Simulate algorithm output from sensor data
     const sd = sensorData[sensorKey];
     if (!sd || sd.history.length < 3) return;
     const latestVal = sd.history[sd.history.length - 1];
-
-    // Simple simulated output (passes through primary sensor with noise)
-    let output = latestVal;
     const range = p.algo.range;
-    output = Math.max(range[0], Math.min(range[1], output));
-
-    // Compute simulated SQI
+    let output = Math.max(range[0], Math.min(range[1], latestVal));
     const sqi = computeSimulatedSQI(p.algo, sensorKey);
+    const display = p.algo.display || {};
+    const layout = p.layout || 'gauge';
+    const el = p.element;
 
-    // Update display
-    const outEl = p.element.querySelector('.algo-output-value');
-    if (output === 0 && SENSOR_DEFS.find(s => s.key === sensorKey)?.zeroMeansOff) {
-      outEl.textContent = '--';
-    } else {
-      outEl.textContent = output.toFixed(p.algo.unit === 'BPM' || p.algo.unit === 'steps' ? 0 : 1);
+    // ── Custom update() from display module ──
+    if (p.algo.displayModule && typeof p.algo.displayModule.update === 'function') {
+      p.history.push(output);
+      if (p.history.length > HISTORY_MAX) p.history.shift();
+      const state = {
+        output, sqi, history: p.history,
+        sensorData: Object.fromEntries(channels.map(ch => [ch, {
+          latest: sensorData[ch]?.history?.slice(-1)[0] ?? 0,
+          online: sensorData[ch]?.online ?? false,
+          history: sensorData[ch]?.history ?? [],
+        }])),
+        elapsed: p.startTime ? Date.now() - p.startTime : 0,
+        params: p.paramValues || {},
+        algo: { id: p.algo.id, name: p.algo.name, unit: p.algo.unit, range: p.algo.range },
+        util: { drawSparkline, drawHeatmap, sizeCanvas },
+      };
+      try {
+        p.algo.displayModule.update(el.querySelector('.panel-body') || el, state);
+      } catch (err) {
+        logConsole('error', p.algo.id, 'update() error: ' + err.message);
+      }
+      // Still update sensor chip availability
+      const inputsList2 = el.querySelector('.algo-inputs-list');
+      if (inputsList2) {
+        inputsList2.querySelectorAll('.algo-input-chip').forEach((chip, i) => {
+          const sk = channels[i];
+          const isAvail = sensorData[sk] && sensorData[sk].online;
+          chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
+        });
+      }
+      return;  // skip built-in layout update
     }
 
-    // Update SQI gauge
-    updateSQIGauge(p.element, sqi);
+    // ── Zone-colored value ──
+    const outEl = el.querySelector('.algo-output-value');
+    if (outEl) {
+      const intUnits = ['BPM','steps','kcal','spm','score','0-100','0-21','yrs','AHI'];
+      outEl.textContent = intUnits.includes(p.algo.unit) ? Math.round(output) : output.toFixed(1);
+      // Apply zone color
+      if (display.zones) {
+        const zone = display.zones.find(z => output >= z.min && output < z.max) || display.zones[display.zones.length - 1];
+        if (zone) outEl.style.color = zone.color;
+      }
+    }
 
-    // Algo waveform
+    // ── Zone bar needle position ──
+    const needle = el.querySelector('.zone-bar-needle');
+    if (needle && range[1] !== range[0]) {
+      const pct = Math.max(0, Math.min(100, ((output - range[0]) / (range[1] - range[0])) * 100));
+      needle.style.left = pct + '%';
+    }
+
+    // ── SQI gauge (arc style) ──
+    updateSQIGauge(el, sqi);
+
+    // ── SQI mini bar ──
+    const sqiMiniFill = el.querySelector('.sqi-mini-fill');
+    const sqiMiniVal = el.querySelector('.sqi-mini-val');
+    if (sqiMiniFill) {
+      sqiMiniFill.style.width = (sqi * 100) + '%';
+      sqiMiniFill.style.background = sqi > 0.7 ? 'var(--green)' : sqi > 0.4 ? 'var(--orange)' : 'var(--red)';
+    }
+    if (sqiMiniVal) sqiMiniVal.textContent = (sqi * 100).toFixed(0);
+
+    // ── Sparkline / waveform ──
     p.history.push(output);
     if (p.history.length > HISTORY_MAX) p.history.shift();
-    drawSparkline(p.element.querySelector('.algo-waveform-canvas'), p.history, '#6366f1');
+    const canvas = el.querySelector('.algo-waveform-canvas');
+    const lineColors = { gauge:'#6366f1', waveform:'#22c55e', score:'#f59e0b', counter:'#3b82f6',
+      'multi-metric':'#a855f7', timeline:'#6366f1', phases:'#a855f7', 'event-log':'#ef4444',
+      status:'#f59e0b', heatmap:'#22c55e' };
+    if (canvas) drawSparkline(canvas, p.history, lineColors[layout] || '#6366f1');
 
-    // Update sensor chips availability
-    const inputsList = p.element.querySelector('.algo-inputs-list');
+    // ── Secondary metrics (simulated) ──
+    if (display.secondary) {
+      display.secondary.forEach(m => {
+        const valEl = el.querySelector(`.secondary-val[data-key="${m.key}"], .strip-val[data-key="${m.key}"]`);
+        if (valEl) {
+          const sim = output * (0.8 + Math.random() * 0.4);
+          valEl.textContent = sim.toFixed(m.decimals ?? 1);
+        }
+      });
+    }
+
+    // ── Score ring arc ──
+    if (layout === 'score') {
+      const arc = el.querySelector('.score-ring-arc');
+      if (arc && range[1] > range[0]) {
+        const pct = Math.max(0, Math.min(1, (output - range[0]) / (range[1] - range[0])));
+        arc.style.strokeDashoffset = 327 * (1 - pct);
+        // Color the arc per zone
+        if (display.zones) {
+          const zone = display.zones.find(z => output >= z.min && output < z.max) || display.zones[display.zones.length - 1];
+          if (zone) arc.style.stroke = zone.color;
+        }
+      }
+    }
+
+    // ── Score breakdown (simulated) ──
+    if (layout === 'score' && display.breakdown) {
+      display.breakdown.forEach(b => {
+        const subVal = Math.max(0, Math.min(100, 50 + (Math.random() - 0.5) * 40));
+        const fillEl = el.querySelector(`.breakdown-fill[data-key="${b.key}"]`);
+        const valEl2 = el.querySelector(`.breakdown-value[data-key="${b.key}"]`);
+        if (fillEl) fillEl.style.width = subVal + '%';
+        if (valEl2) valEl2.textContent = subVal.toFixed(0);
+      });
+    }
+
+    // ── Counter delta ──
+    if (layout === 'counter') {
+      const deltaEl = el.querySelector('.delta-value');
+      if (deltaEl && p.history.length > 10) {
+        const recent = p.history.slice(-10);
+        const delta = recent[recent.length - 1] - recent[0];
+        deltaEl.textContent = delta > 0 ? '+' + Math.round(delta) : Math.round(delta);
+      }
+    }
+
+    // ── Multi-metric grid ──
+    if (layout === 'multi-metric' && display.metrics) {
+      display.metrics.forEach(m => {
+        const sim = output + (Math.random() - 0.5) * ((m.range ? m.range[1] - m.range[0] : 10) * 0.05);
+        const clamped = m.range ? Math.max(m.range[0], Math.min(m.range[1], sim)) : sim;
+        const valEl2 = el.querySelector(`.metric-value[data-key="${m.key}"]`);
+        if (valEl2) valEl2.textContent = clamped.toFixed(1);
+        if (p.metricHistories[m.key]) {
+          p.metricHistories[m.key].push(clamped);
+          if (p.metricHistories[m.key].length > HISTORY_MAX) p.metricHistories[m.key].shift();
+        }
+      });
+    }
+
+    // ── Phases ──
+    if (layout === 'phases' && display.phases) {
+      const idx = Math.floor(Math.random() * display.phases.length);
+      const phase = display.phases[idx];
+      const badgeEl = el.querySelector('.phase-current-badge');
+      if (badgeEl) {
+        badgeEl.style.background = phase.color + '20';
+        badgeEl.style.color = phase.color;
+        badgeEl.style.borderColor = phase.color + '40';
+        badgeEl.querySelector('.phase-dot').style.background = phase.color;
+        badgeEl.querySelector('.phase-current-label').textContent = phase.label;
+      }
+      // Add segment to phase bar
+      const track = el.querySelector('.phase-bar-track');
+      if (track) {
+        const seg = document.createElement('div');
+        seg.className = 'phase-bar-seg';
+        seg.style.background = phase.color;
+        track.appendChild(seg);
+        // Keep max ~100 segments
+        while (track.children.length > 100) track.removeChild(track.firstChild);
+      }
+    }
+
+    // ── Event-log ──
+    if (layout === 'event-log') {
+      // Simulate occasional events
+      if (Math.random() < 0.05) {
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString();
+        p.events.push({ time: timeStr, value: output.toFixed(1) });
+        if (p.events.length > 50) p.events.shift();
+        const countEl = el.querySelector('.event-count-num');
+        if (countEl) countEl.textContent = p.events.length;
+        const lastEl = el.querySelector('.event-last-time');
+        if (lastEl) lastEl.textContent = 'Last: ' + timeStr;
+        const listEl = el.querySelector('.algo-event-list');
+        if (listEl) {
+          listEl.innerHTML = p.events.slice(-8).reverse().map(e =>
+            `<div class="event-list-item"><span class="event-time">${e.time}</span><span class="event-val">${e.value} ${p.algo.unit}</span></div>`
+          ).join('');
+        }
+      }
+    }
+
+    // ── Status ──
+    if (layout === 'status') {
+      const active = output > (range[0] + range[1]) / 2;
+      const textEl = el.querySelector('.status-text-big');
+      const iconEl = el.querySelector('.status-icon-big');
+      if (textEl) {
+        textEl.textContent = active ? 'ACTIVE' : 'INACTIVE';
+        textEl.style.color = active ? 'var(--green)' : 'var(--text-3)';
+      }
+      if (iconEl) iconEl.style.color = active ? 'var(--green)' : 'var(--text-3)';
+      const fill = el.querySelector('.status-bar-fill');
+      if (fill && range[1] !== range[0]) {
+        fill.style.width = ((output - range[0]) / (range[1] - range[0]) * 100) + '%';
+      }
+    }
+
+    // ── Sensor chip updates ──
+    const inputsList = el.querySelector('.algo-inputs-list');
     if (inputsList) {
       const chips = inputsList.querySelectorAll('.algo-input-chip');
       chips.forEach((chip, i) => {
@@ -834,9 +1610,7 @@ function computeSimulatedSQI(algo, sensorKey) {
   const mean = recent.reduce((a,b) => a+b, 0) / recent.length;
   const variance = recent.reduce((a,v) => a + (v-mean)**2, 0) / recent.length;
   const cv = mean !== 0 ? Math.sqrt(variance) / Math.abs(mean) : 1;
-  // Lower CV = higher quality
   let sqi = Math.max(0, Math.min(1, 1 - cv * 2));
-  // Penalize if sensor is stale
   if (Date.now() - sd.lastUpdate > 3000) sqi *= 0.3;
   return sqi;
 }
@@ -845,10 +1619,9 @@ function updateSQIGauge(panelEl, sqi) {
   const arc = panelEl.querySelector('.sqi-arc');
   const valEl = panelEl.querySelector('.sqi-value');
   if (!arc || !valEl) return;
-  const maxDash = 126; // circumference of the arc path
+  const maxDash = 126;
   arc.style.strokeDashoffset = maxDash * (1 - sqi);
   valEl.textContent = (sqi * 100).toFixed(0);
-  // Color based on quality
   if (sqi > 0.7) arc.style.stroke = 'var(--green)';
   else if (sqi > 0.4) arc.style.stroke = 'var(--orange)';
   else arc.style.stroke = 'var(--red)';
@@ -894,6 +1667,35 @@ function drawSparkline(canvas, data, color) {
   const last = pts[pts.length-1];
   ctx.beginPath(); ctx.arc(last.x, last.y, 3 * devicePixelRatio, 0, Math.PI * 2);
   ctx.fillStyle = color; ctx.fill();
+}
+
+// ─── Heatmap Canvas Renderer ─────────────────────────────────
+function drawHeatmap(canvas, data, rows, cols) {
+  if (!canvas || !data || data.length === 0) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+  const cellW = w / cols, cellH = h / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const val = data[r * cols + c] || 0; // 0..1
+      // Interpolate: green → yellow → red
+      let cr, cg, cb;
+      if (val < 0.5) {
+        const t = val * 2;
+        cr = Math.round(34 + t * (245 - 34));
+        cg = Math.round(197 - t * (197 - 158));
+        cb = Math.round(94 - t * (94 - 11));
+      } else {
+        const t = (val - 0.5) * 2;
+        cr = Math.round(245 + t * (239 - 245));
+        cg = Math.round(158 - t * (158 - 68));
+        cb = Math.round(11 + t * (68 - 11));
+      }
+      ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+      ctx.fillRect(c * cellW, r * cellH, cellW - 1, cellH - 1);
+    }
+  }
 }
 
 function drawVec3Sparkline(canvas, dataX, dataY, dataZ) {
@@ -991,10 +1793,17 @@ function initCustomAlgoImport() {
   // Load any previously saved custom algos from localStorage
   try {
     const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
-    saved.forEach(algoConfig => registerCustomAlgo(algoConfig, false));
-    if (saved.length > 0) {
+    let count = 0;
+    saved.forEach(entry => {
+      try {
+        const config = entry.source ? parseDisplayModule(entry.source) : entry;
+        registerCustomAlgo(config, entry.source || null, false);
+        count++;
+      } catch (_) {}
+    });
+    if (count > 0) {
       renderAlgoList();
-      logConsole('info', 'SYS', `Restored ${saved.length} custom algorithm(s) from storage`);
+      logConsole('info', 'SYS', `Restored ${count} custom algorithm(s) from storage`);
     }
   } catch (_) {}
 }
@@ -1007,7 +1816,8 @@ function loadCustomAlgoFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
     try {
-      const config = parseDisplayModule(e.target.result);
+      const source = e.target.result;
+      const config = parseDisplayModule(source);
       if (!config || !config.id || !config.name) {
         logConsole('error', 'IMPORT', `Invalid display module: missing id or name in ${file.name}`);
         return;
@@ -1017,7 +1827,7 @@ function loadCustomAlgoFile(file) {
         logConsole('warn', 'IMPORT', `Algorithm ${config.id} already exists — skipping`);
         return;
       }
-      registerCustomAlgo(config, true);
+      registerCustomAlgo(config, source, true);
       renderAlgoList();
       logConsole('success', 'IMPORT', `Loaded custom algorithm: ${config.id} — ${config.name}`);
     } catch (err) {
@@ -1028,39 +1838,22 @@ function loadCustomAlgoFile(file) {
 }
 
 function parseDisplayModule(source) {
-  // Extract the default export object from display.js source text.
-  // Handles: export default { ... }  or  module.exports = { ... }
-  // Uses a safe approach: extract the object literal and parse as JSON5-like.
-  let objStr = '';
-
-  // Try "export default { ... }" pattern
-  const exportMatch = source.match(/export\s+default\s+(\{[\s\S]*\})\s*;?\s*$/);
-  if (exportMatch) {
-    objStr = exportMatch[1];
-  } else {
-    // Try "module.exports = { ... }" pattern
-    const moduleMatch = source.match(/module\.exports\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
-    if (moduleMatch) objStr = moduleMatch[1];
+  // Evaluate the display module — supports full JavaScript including
+  // render(), update(), css, and any computed values.
+  // Replaces "export default" / "module.exports =" with a return statement
+  // then wraps in new Function for scoped execution.
+  const wrapped = source
+    .replace(/^\s*export\s+default\s+/m, 'return ')
+    .replace(/^\s*module\.exports\s*=\s*/m, 'return ');
+  try {
+    const fn = new Function('drawSparkline', 'drawHeatmap', 'sizeCanvas', wrapped);
+    return fn(drawSparkline, drawHeatmap, sizeCanvas);
+  } catch (err) {
+    throw new Error('Display module evaluation failed: ' + err.message);
   }
-
-  if (!objStr) throw new Error('No export default or module.exports found');
-
-  // Convert JS object literal to valid JSON:
-  // - Remove trailing commas
-  // - Quote unquoted keys
-  // - Remove single-line comments
-  // - Remove multi-line comments
-  let cleaned = objStr
-    .replace(/\/\/.*$/gm, '')          // remove single-line comments
-    .replace(/\/\*[\s\S]*?\*\//g, '')  // remove multi-line comments
-    .replace(/,\s*([}\]])/g, '$1')     // remove trailing commas
-    .replace(/(\{|,)\s*(\w+)\s*:/g, '$1"$2":')  // quote unquoted keys
-    .replace(/'/g, '"');               // single quotes to double
-
-  return JSON.parse(cleaned);
 }
 
-function registerCustomAlgo(config, persist) {
+function registerCustomAlgo(config, source, persist) {
   const algo = {
     id: config.id,
     name: config.name,
@@ -1068,8 +1861,8 @@ function registerCustomAlgo(config, persist) {
     tier: config.tier ?? 0,
     channels: config.channels || [],
     sensors: config.channels || [],
-    unit: config.primary?.unit || '',
-    range: config.primary?.range || [0, 100],
+    unit: config.unit || config.primary?.unit || '',
+    range: config.range || config.primary?.range || [0, 100],
     classification: config.classification || 'wellness',
     params: (config.params || []).map(p => ({
       n: p.name, min: p.min, max: p.max, default: p.default, step: p.step, unit: p.unit || ''
@@ -1077,248 +1870,37 @@ function registerCustomAlgo(config, persist) {
     custom: true,
     layout: config.layout || 'gauge',
     displayConfig: config,
+    // The full module — may contain render(), update(), css, destroy()
+    displayModule: config,
     metrics: config.metrics || null,
     breakdown: config.breakdown || null,
     primaryKey: config.primary?.key || (config.metrics && config.metrics[0]?.key) || null,
     size: config.size || '1x1',
   };
 
+  // Build .display for built-in layout fallback (used when no render() exists)
+  algo.display = {
+    layout: config.layout || 'gauge',
+    size: config.size || '1x1',
+    zones: config.primary?.zones || config.zones || null,
+    secondary: (config.secondary || []).filter(s => s.type === 'number').map(s => ({
+      key: s.key, label: s.label, unit: s.unit || '', decimals: s.decimals ?? 1
+    })),
+    warmupSeconds: config.warmupSeconds || 0,
+    breakdown: config.breakdown || null,
+    metrics: config.metrics || null,
+    phases: config.phases || null,
+  };
+
   CUSTOM_ALGOS.push(algo);
 
-  if (persist) {
+  if (persist && source) {
     try {
       const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
-      saved.push(config);
+      saved.push({ id: config.id, source });
       localStorage.setItem('openpulse-custom-algos', JSON.stringify(saved));
     } catch (_) {}
   }
-}
-
-// ─── Custom Algorithm Panel ──────────────────────────────────
-function toggleCustomAlgoPanel(algoId) {
-  const pid = 'custom-' + algoId;
-  if (activePanels[pid]) { removePanel(pid); return; }
-  const algo = CUSTOM_ALGOS.find(a => a.id === algoId);
-  if (!algo) return;
-
-  const tpl = $('#tpl-custom-algo-panel');
-  const clone = tpl.content.cloneNode(true);
-  const el = clone.querySelector('.panel');
-  el.dataset.panelId = pid;
-  el.querySelector('.panel-title').textContent = algo.id + ': ' + algo.name;
-  el.querySelector('.panel-subtitle').textContent = (algo.layout || 'gauge') + ' · tier ' + algo.tier;
-  el.querySelector('.algo-output-unit').textContent = algo.unit;
-
-  // Meta tags
-  const metaRow = el.querySelector('.algo-meta-row');
-  metaRow.innerHTML = `
-    <span class="algo-meta-tag custom">custom</span>
-    <span class="algo-meta-tag ${algo.layout}">${algo.layout}</span>
-    <span class="algo-meta-tag ${algo.classification}">${algo.classification.replace('-',' ')}</span>`;
-
-  // Required sensors
-  const sensors = algo.sensors || algo.channels || [];
-  const inputsList = el.querySelector('.algo-inputs-list');
-  sensors.forEach(sk => {
-    const sdef = SENSOR_DEFS.find(s => s.key === sk);
-    const isAvail = sensorData[sk] && sensorData[sk].online;
-    const chip = document.createElement('span');
-    chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
-    chip.innerHTML = `<span class="chip-dot"></span>${sdef ? sdef.name : sk}`;
-    inputsList.appendChild(chip);
-  });
-
-  // Multi-metric grid
-  if (algo.metrics && algo.metrics.length > 0) {
-    const grid = el.querySelector('.custom-metrics-grid');
-    grid.style.display = '';
-    algo.metrics.forEach(m => {
-      const cell = document.createElement('div');
-      cell.className = 'metric-cell';
-      cell.dataset.metricKey = m.key;
-      cell.innerHTML = `
-        <div class="metric-value" data-key="${m.key}">--</div>
-        <div class="metric-label">${m.label}</div>
-        <div class="metric-unit">${m.unit}</div>`;
-      grid.appendChild(cell);
-    });
-  }
-
-  // Score breakdown bars
-  if (algo.breakdown && algo.breakdown.length > 0) {
-    const section = el.querySelector('.custom-breakdown-section');
-    section.style.display = '';
-    const barsContainer = section.querySelector('.breakdown-bars');
-    algo.breakdown.forEach(b => {
-      const row = document.createElement('div');
-      row.className = 'breakdown-row';
-      row.innerHTML = `
-        <span class="breakdown-label">${b.label}</span>
-        <div class="breakdown-track">
-          <div class="breakdown-fill" data-key="${b.key}" style="width:0%"></div>
-        </div>
-        <span class="breakdown-weight">${(b.weight * 100).toFixed(0)}%</span>
-        <span class="breakdown-value" data-key="${b.key}">--</span>`;
-      barsContainer.appendChild(row);
-    });
-  }
-
-  // Parameters
-  const paramsList = el.querySelector('.algo-params-list');
-  const paramValues = {};
-  if (algo.params && algo.params.length > 0) {
-    algo.params.forEach(p => {
-      paramValues[p.n] = p.default;
-      const row = document.createElement('div');
-      row.className = 'param-row';
-      row.innerHTML = `
-        <span class="param-label">${p.n}</span>
-        <input type="range" class="param-slider" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.default}">
-        <span class="param-value-display">${p.default}</span>
-        <span class="param-unit">${p.unit}</span>`;
-      const slider = row.querySelector('.param-slider');
-      const display = row.querySelector('.param-value-display');
-      slider.addEventListener('input', () => {
-        const v = parseFloat(slider.value);
-        display.textContent = v;
-        paramValues[p.n] = v;
-        logConsole('info', algo.id, `${p.n} = ${v} ${p.unit}`);
-      });
-      paramsList.appendChild(row);
-    });
-  } else {
-    paramsList.innerHTML = '<div style="color:var(--text-3);font-size:11px;padding:4px 0;">No tunable parameters</div>';
-  }
-
-  // Reset params
-  el.querySelector('.btn-reset-params').addEventListener('click', () => {
-    if (!algo.params) return;
-    algo.params.forEach(p => {
-      paramValues[p.n] = p.default;
-      const rows = paramsList.querySelectorAll('.param-row');
-      rows.forEach(r => {
-        if (r.querySelector('.param-label').textContent === p.n) {
-          r.querySelector('.param-slider').value = p.default;
-          r.querySelector('.param-value-display').textContent = p.default;
-        }
-      });
-    });
-    logConsole('info', algo.id, 'Parameters reset to defaults');
-  });
-
-  // Start/stop
-  const toggleBtn = el.querySelector('.btn-algo-toggle');
-  let running = false;
-  toggleBtn.addEventListener('click', () => {
-    running = !running;
-    const badge = el.querySelector('.algo-state-badge');
-    if (running) {
-      badge.dataset.state = 'acquiring';
-      badge.textContent = 'ACQUIRING';
-      toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
-      logConsole('success', algo.id, 'Custom algorithm started');
-      setTimeout(() => {
-        if (running && activePanels[pid]) {
-          const allAvail = sensors.every(sk => sensorData[sk] && sensorData[sk].online);
-          badge.dataset.state = allAvail ? 'valid' : 'low_quality';
-          badge.textContent = allAvail ? 'VALID' : 'LOW QUALITY';
-        }
-      }, 2000);
-    } else {
-      badge.dataset.state = 'idle';
-      badge.textContent = 'IDLE';
-      toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
-      logConsole('info', algo.id, 'Custom algorithm stopped');
-    }
-    updateRunningCount();
-  });
-
-  el.querySelector('.btn-panel-close').addEventListener('click', () => removePanel(pid));
-
-  activePanels[pid] = {
-    type: 'custom-algo', algoId, element: el, algo, paramValues,
-    running: false, history: [], metricHistories: {}
-  };
-  // Init per-metric histories
-  if (algo.metrics) {
-    algo.metrics.forEach(m => { activePanels[pid].metricHistories[m.key] = []; });
-  }
-
-  showPanel(el);
-  renderSensorList();
-  renderAlgoList();
-
-  requestAnimationFrame(() => {
-    const canvas = el.querySelector('.algo-waveform-canvas');
-    if (canvas) sizeCanvas(canvas);
-  });
-}
-
-// ─── Custom Algo Panel Updates ───────────────────────────────
-function updateCustomAlgoPanelsWithSensor(sensorKey) {
-  Object.values(activePanels).forEach(p => {
-    if (p.type !== 'custom-algo') return;
-    const sensors = p.algo.sensors || p.algo.channels || [];
-    if (!sensors.includes(sensorKey)) return;
-    const badge = p.element.querySelector('.algo-state-badge');
-    if (!badge || badge.dataset.state === 'idle') return;
-
-    const sd = sensorData[sensorKey];
-    if (!sd || sd.history.length < 3) return;
-    const latestVal = sd.history[sd.history.length - 1];
-
-    const range = p.algo.range;
-    let output = Math.max(range[0], Math.min(range[1], latestVal));
-
-    // Primary output
-    const outEl = p.element.querySelector('.algo-output-value');
-    outEl.textContent = output.toFixed(p.algo.unit === 'BPM' || p.algo.unit === 'steps' ? 0 : 1);
-
-    // SQI
-    const sqi = computeSimulatedSQI(p.algo, sensorKey);
-    updateSQIGauge(p.element, sqi);
-
-    // Waveform
-    p.history.push(output);
-    if (p.history.length > HISTORY_MAX) p.history.shift();
-    drawSparkline(p.element.querySelector('.algo-waveform-canvas'), p.history, '#a855f7');
-
-    // Multi-metric simulation
-    if (p.algo.metrics) {
-      p.algo.metrics.forEach(m => {
-        const simVal = output + (Math.random() - 0.5) * (m.range ? (m.range[1] - m.range[0]) * 0.05 : 2);
-        const clamped = m.range ? Math.max(m.range[0], Math.min(m.range[1], simVal)) : simVal;
-        const valEl = p.element.querySelector(`.metric-value[data-key="${m.key}"]`);
-        if (valEl) valEl.textContent = clamped.toFixed(1);
-        if (p.metricHistories[m.key]) {
-          p.metricHistories[m.key].push(clamped);
-          if (p.metricHistories[m.key].length > HISTORY_MAX) p.metricHistories[m.key].shift();
-        }
-      });
-    }
-
-    // Breakdown simulation
-    if (p.algo.breakdown) {
-      p.algo.breakdown.forEach(b => {
-        const subVal = Math.max(0, Math.min(100, 50 + (Math.random() - 0.5) * 40));
-        const fillEl = p.element.querySelector(`.breakdown-fill[data-key="${b.key}"]`);
-        const valEl = p.element.querySelector(`.breakdown-value[data-key="${b.key}"]`);
-        if (fillEl) fillEl.style.width = subVal + '%';
-        if (valEl) valEl.textContent = subVal.toFixed(0);
-      });
-    }
-
-    // Update sensor chips
-    const inputsList = p.element.querySelector('.algo-inputs-list');
-    if (inputsList) {
-      const chips = inputsList.querySelectorAll('.algo-input-chip');
-      chips.forEach((chip, i) => {
-        const sk = sensors[i];
-        const isAvail = sensorData[sk] && sensorData[sk].online;
-        chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
-      });
-    }
-  });
 }
 
 // ─── Remove Custom Algo ──────────────────────────────────────
@@ -1332,7 +1914,7 @@ function removeCustomAlgo(algoId) {
   // Update storage
   try {
     const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
-    const filtered = saved.filter(c => c.id !== algoId);
+    const filtered = saved.filter(entry => entry.id !== algoId);
     localStorage.setItem('openpulse-custom-algos', JSON.stringify(filtered));
   } catch (_) {}
   renderAlgoList();
@@ -1477,4 +2059,442 @@ function serialLog(text, isSystem) {
   // Cap at 2000 lines
   while (output.children.length > 2000) output.removeChild(output.firstChild);
   if ($('#serial-autoscroll').checked) output.scrollTop = output.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Simulation Engine
+// ═══════════════════════════════════════════════════════════════
+
+const sim = {
+  running: false,
+  mode: 'timespan', // 'timespan' or 'live'
+  channels: new Set(),   // selected channel keys
+  totalSeconds: 604800,  // 7 days default
+  speed: 1000,           // 1000x default
+  timer: null,
+  elapsed: 0,            // simulated seconds elapsed
+  sampleInterval: 0.1,   // 10 Hz base tick (seconds)
+  aborted: false,
+  liveStartTime: null,   // wall-clock start for live mode
+};
+
+// ─── Signal Generators ──────────────────────────────────────
+// Each returns a realistic value given simulated time (seconds)
+const SIM_GENERATORS = {
+  ppg(t) {
+    // Simulated PPG: pulsatile waveform ~72 BPM baseline with diurnal variation
+    const hr = 68 + 8 * Math.sin(2 * Math.PI * t / 86400) + 4 * Math.sin(2 * Math.PI * t / 7200);
+    const beatFreq = hr / 60;
+    const pulse = Math.sin(2 * Math.PI * beatFreq * t);
+    const dicrotic = 0.3 * Math.sin(2 * Math.PI * beatFreq * t * 2 + 1);
+    return 80000 + 15000 * (pulse + dicrotic) + (Math.random() - 0.5) * 2000;
+  },
+  ecg(t) {
+    // Simplified ECG-like waveform
+    const hr = 70 + 5 * Math.sin(2 * Math.PI * t / 86400);
+    const beatPeriod = 60 / hr;
+    const phase = (t % beatPeriod) / beatPeriod;
+    // QRS complex
+    if (phase > 0.4 && phase < 0.42) return 0.8 + Math.random() * 0.1;
+    if (phase > 0.42 && phase < 0.44) return -0.3;
+    if (phase > 0.44 && phase < 0.46) return 0.6;
+    // T wave
+    if (phase > 0.55 && phase < 0.7) return 0.15 * Math.sin((phase - 0.55) / 0.15 * Math.PI);
+    return 0.0 + (Math.random() - 0.5) * 0.03;
+  },
+  skinTemp(t) {
+    // Circadian skin temp: ~33-36°C, lowest ~4am, highest ~6pm
+    const hourOfDay = (t % 86400) / 3600;
+    const circadian = 34.5 + 0.8 * Math.sin(2 * Math.PI * (hourOfDay - 6) / 24);
+    // Slow day-to-day drift
+    const drift = 0.3 * Math.sin(2 * Math.PI * t / (86400 * 14));
+    return circadian + drift + (Math.random() - 0.5) * 0.1;
+  },
+  eda(t) {
+    // EDA: tonic level ~2-8 µS with phasic spikes
+    const tonic = 4 + 2 * Math.sin(2 * Math.PI * t / 86400);
+    const spike = (Math.random() < 0.02) ? Math.random() * 3 : 0;
+    return Math.max(0, tonic + spike + (Math.random() - 0.5) * 0.3);
+  },
+  bioz(t) {
+    // Bioimpedance: ~400-600 Ω with slow hydration variation
+    const base = 500 + 50 * Math.sin(2 * Math.PI * t / 86400);
+    const hydration = 30 * Math.sin(2 * Math.PI * t / (86400 * 3));
+    return base + hydration + (Math.random() - 0.5) * 10;
+  },
+  envTemp(t) {
+    // Room temp: 20-25°C diurnal
+    return 22 + 2 * Math.sin(2 * Math.PI * (t % 86400) / 86400 - Math.PI / 3) + (Math.random() - 0.5) * 0.5;
+  },
+  accel(t) {
+    // Returns [x, y, z] — mostly gravity + activity bursts
+    const hourOfDay = (t % 86400) / 3600;
+    const awake = (hourOfDay > 7 && hourOfDay < 23) ? 1 : 0;
+    const activity = awake * 0.3 * Math.random();
+    return [
+      activity * (Math.random() - 0.5),
+      activity * (Math.random() - 0.5),
+      -1 + activity * (Math.random() - 0.5) * 0.3
+    ];
+  },
+  gyro(t) {
+    const hourOfDay = (t % 86400) / 3600;
+    const awake = (hourOfDay > 7 && hourOfDay < 23) ? 1 : 0.1;
+    const scale = awake * 15;
+    return [
+      scale * (Math.random() - 0.5),
+      scale * (Math.random() - 0.5),
+      scale * (Math.random() - 0.5)
+    ];
+  },
+  mic(t) {
+    // Ambient dB: 30-55, louder when awake
+    const hourOfDay = (t % 86400) / 3600;
+    const base = (hourOfDay > 7 && hourOfDay < 22) ? 45 : 32;
+    return base + Math.random() * 8;
+  },
+  humidity(t) {
+    return 45 + 10 * Math.sin(2 * Math.PI * t / 86400) + (Math.random() - 0.5) * 3;
+  },
+  pressure(t) {
+    return 1013 + 5 * Math.sin(2 * Math.PI * t / (86400 * 3)) + (Math.random() - 0.5) * 2;
+  },
+};
+
+// ─── Inject a sample into the real data pipeline ────────────
+function injectSimSample(key, value) {
+  const cdef = CHANNEL_DEFS.find(c => c.key === key);
+  if (!cdef) return;
+
+  if (cdef.type === 'vec3' && Array.isArray(value)) {
+    const buf = new ArrayBuffer(12);
+    const dv = new DataView(buf);
+    dv.setFloat32(0, value[0], true);
+    dv.setFloat32(4, value[1], true);
+    dv.setFloat32(8, value[2], true);
+    onCharChanged(key, dv);
+  } else {
+    const buf = new ArrayBuffer(4);
+    const dv = new DataView(buf);
+    dv.setFloat32(0, typeof value === 'number' ? value : 0, true);
+    onCharChanged(key, dv);
+  }
+}
+
+// ─── Simulation Controller ──────────────────────────────────
+function simStart() {
+  if (sim.running) return;
+  if (sim.channels.size === 0) {
+    logConsole('warn', 'SIM', 'No channels selected');
+    return;
+  }
+
+  sim.running = true;
+  sim.mode = 'timespan';
+  sim.elapsed = 0;
+  sim.aborted = false;
+
+  const totalSamples = Math.ceil(sim.totalSeconds / sim.sampleInterval);
+  logConsole('info', 'SIM', `Starting simulation: ${sim.channels.size} channels, ${formatDuration(sim.totalSeconds)}, ${sim.speed === 0 ? 'instant' : sim.speed + 'x'}`);
+
+  // Mark simulated channels as online
+  sim.channels.forEach(key => {
+    if (sensorData[key]) sensorData[key].online = true;
+  });
+  renderSensorList();
+  renderAlgoList();
+
+  // UI updates
+  $('#sim-start').disabled = true;
+  $('#sim-start-live').disabled = true;
+  $('#sim-stop').disabled = false;
+  $('#sim-progress-section').classList.remove('hidden');
+  $('#btn-simulate').classList.add('btn-simulate-active');
+  setStatus('Simulating…');
+  const statusDot = $('#status-dot');
+  statusDot.className = 'status-dot connected';
+  $('#sb-connection').innerHTML = '<span class="sb-dot simulating"></span> Simulating';
+
+  if (sim.speed === 0) {
+    // Instant mode: generate all samples synchronously in chunks
+    simRunInstant(totalSamples);
+  } else {
+    // Real-time (accelerated) mode
+    const realIntervalMs = (sim.sampleInterval / sim.speed) * 1000;
+    const tickMs = Math.max(16, realIntervalMs); // min 60fps
+    const samplesPerTick = Math.max(1, Math.round(tickMs / realIntervalMs));
+
+    sim.timer = setInterval(() => {
+      if (sim.aborted) { simStop(); return; }
+      for (let i = 0; i < samplesPerTick && sim.elapsed < sim.totalSeconds; i++) {
+        simTick();
+      }
+      simUpdateProgress(totalSamples);
+      if (sim.elapsed >= sim.totalSeconds) simStop();
+    }, tickMs);
+  }
+}
+
+function simRunInstant(totalSamples) {
+  const CHUNK = 500;
+  let done = 0;
+
+  function processChunk() {
+    if (sim.aborted) { simStop(); return; }
+    const end = Math.min(done + CHUNK, totalSamples);
+    for (let i = done; i < end; i++) {
+      simTick();
+    }
+    done = end;
+    simUpdateProgress(totalSamples);
+
+    if (done < totalSamples) {
+      requestAnimationFrame(processChunk);
+    } else {
+      simStop();
+    }
+  }
+  requestAnimationFrame(processChunk);
+}
+
+function simTick() {
+  sim.channels.forEach(key => {
+    const gen = SIM_GENERATORS[key];
+    if (gen) injectSimSample(key, gen(sim.elapsed));
+  });
+  sim.elapsed += sim.sampleInterval;
+}
+
+function simUpdateProgress(totalSamples) {
+  const currentSample = Math.min(Math.ceil(sim.elapsed / sim.sampleInterval), totalSamples);
+  const pct = (currentSample / totalSamples) * 100;
+  $('#sim-progress-fill').style.width = pct + '%';
+  $('#sim-progress-text').textContent = `${formatDuration(sim.elapsed)} / ${formatDuration(sim.totalSeconds)}  (${Math.round(pct)}%)`;
+  $('#sim-stats').textContent = `${sim.channels.size} ch × ${currentSample.toLocaleString()} samples`;
+}
+
+function simStop() {
+  sim.running = false;
+  if (sim.timer) { clearInterval(sim.timer); sim.timer = null; }
+
+  if (sim.mode === 'live') {
+    logConsole('info', 'SIM', `Live simulation stopped after ${formatDuration(sim.elapsed)}`);
+    const elapsedEl = $('#sim-live-elapsed');
+    if (elapsedEl) elapsedEl.classList.add('hidden');
+  } else {
+    const completed = sim.elapsed >= sim.totalSeconds;
+    logConsole(completed ? 'success' : 'warn', 'SIM', completed
+      ? `Simulation complete: ${formatDuration(sim.totalSeconds)}`
+      : `Simulation stopped at ${formatDuration(sim.elapsed)}`);
+  }
+
+  // UI cleanup
+  $('#sim-start').disabled = false;
+  $('#sim-start-live').disabled = false;
+  $('#sim-stop').disabled = true;
+  $('#btn-simulate').classList.remove('btn-simulate-active');
+  if (!isConnected) {
+    setStatus('Disconnected');
+    $('#status-dot').className = 'status-dot disconnected';
+    $('#sb-connection').innerHTML = '<span class="sb-dot disconnected"></span> Disconnected';
+  }
+}
+
+// ─── Live Simulation ────────────────────────────────────────
+function simStartLive() {
+  if (sim.running) return;
+  if (sim.channels.size === 0) {
+    logConsole('warn', 'SIM', 'No channels selected');
+    return;
+  }
+
+  sim.running = true;
+  sim.mode = 'live';
+  sim.elapsed = 0;
+  sim.aborted = false;
+  sim.liveStartTime = Date.now();
+
+  logConsole('info', 'SIM', `Live mode: ${sim.channels.size} channels streaming at 10 Hz`);
+
+  // Mark simulated channels as online
+  sim.channels.forEach(key => {
+    if (sensorData[key]) sensorData[key].online = true;
+  });
+  renderSensorList();
+  renderAlgoList();
+
+  // UI updates
+  $('#sim-start-live').disabled = true;
+  $('#sim-start').disabled = true;
+  $('#sim-stop').disabled = false;
+  $('#btn-simulate').classList.add('btn-simulate-active');
+  setStatus('Live (Sim)');
+  const statusDot = $('#status-dot');
+  statusDot.className = 'status-dot connected';
+  $('#sb-connection').innerHTML = '<span class="sb-dot simulating"></span> Live (Sim)';
+
+  // Show live elapsed timer
+  const elapsedEl = $('#sim-live-elapsed');
+  if (elapsedEl) elapsedEl.classList.remove('hidden');
+
+  // Run at real-time 10 Hz
+  sim.timer = setInterval(() => {
+    if (sim.aborted) { simStop(); return; }
+    simLiveTick();
+  }, 100);
+}
+
+function simLiveTick() {
+  // Use wall-clock seconds since start so signal generators produce real-time patterns
+  const wallElapsed = (Date.now() - sim.liveStartTime) / 1000;
+  sim.elapsed = wallElapsed;
+
+  sim.channels.forEach(key => {
+    const gen = SIM_GENERATORS[key];
+    if (gen) injectSimSample(key, gen(wallElapsed));
+  });
+
+  // Update live timer display
+  const timerEl = $('#sim-live-timer');
+  if (timerEl) {
+    const secs = Math.floor(wallElapsed);
+    const h = String(Math.floor(secs / 3600)).padStart(2, '0');
+    const m = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+    const s = String(secs % 60).padStart(2, '0');
+    timerEl.textContent = `${h}:${m}:${s}`;
+  }
+
+  $('#sim-stats').textContent = `${sim.channels.size} ch · live · ${Math.ceil(sim.elapsed / sim.sampleInterval).toLocaleString()} samples`;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return Math.round(seconds) + 's';
+  if (seconds < 3600) return Math.round(seconds / 60) + 'm';
+  if (seconds < 86400) return (seconds / 3600).toFixed(1) + 'h';
+  return (seconds / 86400).toFixed(1) + 'd';
+}
+
+// ─── Simulation UI Wiring ───────────────────────────────────
+function initSimulation() {
+  // Populate channel grid
+  const grid = $('#sim-channel-grid');
+  CHANNEL_DEFS.forEach(cdef => {
+    const item = document.createElement('div');
+    item.className = 'sim-channel-item';
+    item.dataset.key = cdef.key;
+    item.innerHTML = `<div class="sim-channel-check"></div><span>${cdef.name}</span>`;
+    item.addEventListener('click', () => {
+      item.classList.toggle('selected');
+      if (item.classList.contains('selected')) sim.channels.add(cdef.key);
+      else sim.channels.delete(cdef.key);
+    });
+    grid.appendChild(item);
+  });
+
+  // Select all / deselect all
+  $('#sim-select-all').addEventListener('click', () => {
+    const items = grid.querySelectorAll('.sim-channel-item');
+    const allSelected = sim.channels.size === CHANNEL_DEFS.length;
+    items.forEach(item => {
+      const key = item.dataset.key;
+      if (allSelected) {
+        item.classList.remove('selected');
+        sim.channels.delete(key);
+      } else {
+        item.classList.add('selected');
+        sim.channels.add(key);
+      }
+    });
+    $('#sim-select-all').textContent = allSelected ? 'Select all' : 'Deselect all';
+  });
+
+  // Time preset buttons
+  $('#sim-presets').querySelectorAll('.sim-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $('#sim-presets').querySelectorAll('.sim-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      sim.totalSeconds = parseInt(btn.dataset.seconds);
+      // Sync custom inputs
+      syncCustomTimeInputs(sim.totalSeconds);
+    });
+  });
+
+  // Custom time inputs
+  const customVal = $('#sim-custom-val');
+  const customUnit = $('#sim-custom-unit');
+  function onCustomTimeChange() {
+    const val = parseFloat(customVal.value) || 1;
+    const unitSec = parseInt(customUnit.value);
+    sim.totalSeconds = val * unitSec;
+    // Deselect presets
+    $('#sim-presets').querySelectorAll('.sim-preset').forEach(b => b.classList.remove('active'));
+    // Highlight matching preset if any
+    const match = $('#sim-presets').querySelector(`[data-seconds="${sim.totalSeconds}"]`);
+    if (match) match.classList.add('active');
+  }
+  customVal.addEventListener('input', onCustomTimeChange);
+  customUnit.addEventListener('change', onCustomTimeChange);
+
+  // Speed preset buttons
+  $('#sim-speed-presets').querySelectorAll('.sim-preset').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $('#sim-speed-presets').querySelectorAll('.sim-preset').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      sim.speed = parseInt(btn.dataset.speed);
+    });
+  });
+
+  // Start / Stop
+  $('#sim-start').addEventListener('click', simStart);
+  $('#sim-stop').addEventListener('click', () => { sim.aborted = true; });
+  $('#sim-start-live').addEventListener('click', simStartLive);
+
+  // Mode tab switching
+  document.querySelectorAll('.sim-mode-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      if (sim.running) return; // don't switch while running
+      document.querySelectorAll('.sim-mode-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      sim.mode = tab.dataset.mode;
+
+      const isLive = sim.mode === 'live';
+      // Toggle timespan-only sections
+      document.querySelectorAll('.sim-timespan-only').forEach(el => {
+        el.classList.toggle('sim-mode-hidden', isLive);
+      });
+      // Toggle live-only sections
+      document.querySelectorAll('.sim-live-only').forEach(el => {
+        el.classList.toggle('hidden', !isLive);
+      });
+      // Toggle start buttons
+      $('#sim-start').classList.toggle('hidden', isLive);
+      $('#sim-start-live').classList.toggle('hidden', !isLive);
+    });
+  });
+
+  // Open / Close overlay
+  $('#btn-simulate').addEventListener('click', () => {
+    $('#sim-overlay').classList.toggle('hidden');
+  });
+  $('#sim-close').addEventListener('click', () => {
+    $('#sim-overlay').classList.add('hidden');
+  });
+  // Close on backdrop click
+  $('#sim-overlay').addEventListener('click', e => {
+    if (e.target === $('#sim-overlay')) $('#sim-overlay').classList.add('hidden');
+  });
+}
+
+function syncCustomTimeInputs(totalSeconds) {
+  const customVal = $('#sim-custom-val');
+  const customUnit = $('#sim-custom-unit');
+  if (totalSeconds >= 604800 && totalSeconds % 604800 === 0) {
+    customVal.value = totalSeconds / 604800; customUnit.value = '604800';
+  } else if (totalSeconds >= 86400 && totalSeconds % 86400 === 0) {
+    customVal.value = totalSeconds / 86400; customUnit.value = '86400';
+  } else if (totalSeconds >= 3600 && totalSeconds % 3600 === 0) {
+    customVal.value = totalSeconds / 3600; customUnit.value = '3600';
+  } else {
+    customVal.value = totalSeconds / 60; customUnit.value = '60';
+  }
 }

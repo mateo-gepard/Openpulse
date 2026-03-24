@@ -1,58 +1,494 @@
 ---
 name: openpulse_algorithm_builder
-description: Builds medically-correct, privacy-first biomedical sensor algorithms for the OpenPulse platform from structured spec files.
+description: >
+  End-to-end algorithm builder for the OpenPulse wearable health platform.
+  Two modes: Auto (describe → build) and Guided (progressive interview → build).
+  Supports health-biometric AND sport/motion algorithms.
+  Produces medically-correct, privacy-first, production-quality algorithm packages
+  with firmware code, display modules, test vectors, and specs.
 ---
 
-# OpenPulse Algorithm Builder
+# OpenPulse Algorithm Builder v2
 
-You are building a biomedical algorithm for the **OpenPulse** wearable health platform. OpenPulse runs on a **Seeed XIAO nRF52840 Sense** (ARM Cortex-M4, 256KB RAM, 1MB flash) and communicates via BLE GATT to a web dashboard.
+You are building algorithms for the **OpenPulse** wearable health platform. OpenPulse runs on a **Seeed XIAO nRF52840 Sense** (ARM Cortex-M4, 256KB RAM, 1MB flash) and communicates via BLE GATT to a web dashboard.
 
-This skill ensures every algorithm is **medically defensible**, **privacy-first**, **memory-safe**, and **production-quality** — exceeding the engineering standards of Whoop, Oura, and Garmin.
+This skill automates the **entire algorithm creation pipeline** — from natural language description to production-ready code, display module, and tests. Every output is **replicable**, **medically defensible**, **privacy-first**, and **production-quality**.
 
 ---
 
-## 1. BEFORE YOU WRITE ANY CODE
+## 0. HOW THIS SKILL WORKS
 
-### 1.1 Read the Spec
+### 0.1 Two Modes
 
-Every algorithm has a **spec file** at `algorithms/<ID>_<name>/spec.md`. Read it completely.
-The spec is the contract. If the spec is ambiguous, **stop and ask** — do not guess on medical algorithms.
+| Mode | Trigger | Flow | User Interaction |
+|------|---------|------|------------------|
+| **Auto** | User describes an algorithm in natural language | AI classifies → selects sensors → picks method → generates spec → **shows spec for confirmation** → builds all files | One confirmation checkpoint |
+| **Guided** | User says "help me build", "guide me", "I want to create", or provides vague requirements | AI conducts a **progressive 3–5 round interview** → generates spec → **shows spec for confirmation** → builds all files | 3–5 question rounds + confirmation |
 
-If no spec exists yet, create one using the template at `.agents/skills/openpulse_algorithm/templates/spec_template.md`.
+**Mode detection heuristic:**
+- User provides a specific algorithm description with clear intent AND the target metric is unambiguous (e.g., "Build a heart rate algorithm using PPG") → **Auto Mode**
+- User provides a spec file or references an existing spec → **Direct Build** (skip to §11 Code Generation)
+- User is vague, exploratory, or explicitly asks to be guided → **Guided Mode**
+- The target is a **derived state** (fatigue, readiness, alertness, mood, cognitive load) → **Guided Mode** (requires disambiguation)
+- The description maps to a **composite** (score, report, recommendation) → **Guided Mode** (requires dependency check)
+- When in doubt → **Guided Mode** (safer for medical algorithms)
 
-### 1.2 Read All Dependencies
+**After mode detection, ALWAYS run the Registry Lookup (§1.4) before proceeding.**
 
-Check the `Dependencies` field in the spec. For each dependency:
-1. Read its spec file
-2. Read its `firmware.h` header
-3. Understand its output format, update rate, and edge cases
+### 0.2 Output File Set
 
-Never access a dependency's internal state — only use its public API.
-
-### 1.3 Verify Hardware Assumptions
-
-Cross-reference the spec against this hardware truth table. If the spec claims data the hardware cannot provide, **flag it immediately**.
+Every algorithm build produces this **exact** file set:
 
 ```
-┌────────────────┬──────────────┬────────────┬─────────────┬──────────┐
-│ Channel        │ Typical Chip │ Bus        │ Max Rate    │ Bits     │
-├────────────────┼──────────────┼────────────┼─────────────┼──────────┤
-│ CH_PPG / ECG   │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │
-│ CH_SKIN_TEMP   │ TMP117       │ Wire, 0x48 │ 1 Hz        │ 16-bit   │
-│ CH_EDA         │ ADS1115      │ Wire, 0x49 │ 10 Hz       │ 16-bit   │
-│ CH_BIOZ        │ AD5933       │ Wire, 0x0D │ On-demand   │ 12-bit   │
-│ CH_ACCEL/GYRO  │ LSM6DS3TR    │ Wire1,0x6A │ 50 Hz       │ 16-bit   │
-│ CH_MIC         │ PDM          │ Digital    │ 16000 Hz    │ 16-bit   │
-└────────────────┴──────────────┴────────────┴─────────────┴──────────┘
+algorithms/<ID>_<name>/
+├── spec.md              ← Algorithm specification (the contract)
+├── display.js           ← Dashboard render module (layout, zones, chart config)
+└── test_vectors.h       ← Simulated test scenarios (C++ struct array)
+
+firmware/src/algorithms/<base|fusion>/
+├── Algo_<ID>.h          ← Header (class declaration inheriting AlgorithmBase)
+└── Algo_<ID>.cpp        ← Implementation (state machine, SQI, algorithm logic)
 ```
+
+For **Tier 3 (off-device)** algorithms, ALSO generate:
+```
+dev/dashboard/algorithms/
+└── algo_<id>.js         ← Browser-side computation module
+```
+
+### 0.3 ID Scheme
+
+| Prefix | Range | Meaning | Assigned by |
+|--------|-------|---------|-------------|
+| A | A01–A27 | Core base algorithms (single-sensor) | Reserved — documented in registry |
+| X | X01–X17 | Core cross-sensor fusion | Reserved — documented in registry |
+| C | C01–C10 | Core composite scores | Reserved — documented in registry |
+| **U** | **U01–U99** | **User-created algorithms** | **Auto-assigned: scan `algorithms/U*` dirs, take next available** |
+
+To assign the next U-series ID:
+1. List all directories matching `algorithms/U[0-9][0-9]_*/`
+2. Extract the numeric parts, find the maximum
+3. Next ID = max + 1 (or U01 if none exist)
 
 ---
 
-## 2. MEDICAL CORRECTNESS RULES
+## 1. ALGORITHM CATEGORY ROUTER
 
-These rules are **non-negotiable**. Every algorithm must satisfy all of them.
+Before generating anything, classify the algorithm into one of three categories. This determines which rule sets apply.
 
-### 2.1 Every Formula Must Have a Citation
+### 1.1 Category Decision Tree
+
+```
+User describes algorithm
+         │
+         ▼
+Does it measure a PHYSIOLOGICAL VITAL SIGN?
+(HR, SpO2, BP, temp, HRV, EDA, respiratory rate, sleep stages)
+    │                    │
+   YES                  NO
+    │                    │
+    ▼                    ▼
+HEALTH path        Does it detect MOVEMENT PATTERNS?
+                   (steps, sport technique, gestures, posture, activity type)
+                        │                    │
+                       YES                  NO
+                        │                    │
+                        ▼                    ▼
+                  SPORT/MOTION path    Does it combine BOTH?
+                                      (calorie burn, workout HR zones,
+                                       stress vs exercise, sleep+motion)
+                                            │          │
+                                           YES        NO
+                                            │          │
+                                            ▼          ▼
+                                      HYBRID path   Is it a DERIVED STATE?
+                                                    (fatigue, readiness, alertness,
+                                                     mood, cognitive load, overtraining)
+                                                          │          │
+                                                         YES        NO → Guided Mode
+                                                          │           (need more info)
+                                                          ▼
+                                                    HYBRID path
+                                                    (default — interview
+                                                     determines sensors)
+```
+
+**Derived states** are higher-order interpretations of multiple biomarkers that don't fit neatly into "vital sign" or "movement pattern." Examples: exercise fatigue (HR drift + movement quality), mental fatigue (HRV + EDA trend), overtraining (resting HR trend + HRV + sleep). These always route to **Hybrid** and require Guided Mode to disambiguate the specific variant.
+
+### 1.2 Rule Set by Category
+
+| Category | Medical Citations | Physiological Clamping | SQI Required | Motion Rejection | Biomechanical Validation | Display Default |
+|----------|-------------------|----------------------|--------------|------------------|--------------------------|-----------------|
+| `health-biometric` | **MANDATORY** — peer-reviewed | **MANDATORY** — hard clamp to ranges in §6.2 | **MANDATORY** | If PPG/ECG used | No | `gauge` |
+| `sport-motion` | Optional — cite biomechanics lit if available | Range-check (not physiological clamp) | Recommended | N/A — motion IS the signal | **MANDATORY** — validate movement model | `multi-metric` |
+| `hybrid` | **MANDATORY** for health components | **MANDATORY** for health outputs | **MANDATORY** for health outputs | Context-dependent | For motion components | `gauge` or `multi-metric` |
+
+### 1.3 Sport/Motion — Acceptable Reference Sources
+
+For sport/motion algorithms, acceptable citations include:
+1. **Biomechanics journals** (Journal of Biomechanics, Sports Engineering, Sensors)
+2. **IMU motion analysis papers** (Camomilla et al. 2018, Rawashdeh et al. 2016)
+3. **Validated open-source implementations** (OpenSense, IMU-based human activity recognition literature)
+4. **Sports science textbooks** (Hamill & Knutzen "Biomechanical Basis of Human Movement")
+5. **Validated IMU datasets** (UCI HAR, PAMAP2, WISDM, sport-specific datasets)
+
+### 1.4 Registry Lookup (Mandatory Before Building)
+
+Before generating any new algorithm, **search `resources/algorithm_registry.md`** for existing entries:
+
+1. **Exact match** — An algorithm with the same purpose already exists (e.g., user asks "heart rate" and A01 exists). → Tell the user: *"A01_heart_rate already covers this. Do you want to extend it, create a variant, or do something else?"*
+2. **Overlapping match** — A similar algorithm exists but differs in scope (e.g., user asks "resting heart rate trend" and A06 exists). → Tell the user what exists and ask how theirs differs.
+3. **No match** — Proceed with a new algorithm. Assign the next available ID in the correct series (A/X/C/U).
+
+**ID assignment rules:**
+- Core algorithms (A01–A27, X01–X17, C01–C10) are pre-assigned. If the user's algorithm matches a planned core algo, use that ID.
+- User-created algorithms use U-series: U01, U02, … U99.
+- Never reuse or reassign an existing ID.
+
+### 1.5 Dependency Resolution (Composites & Cross-Sensor)
+
+Composite (C-series) and some cross-sensor (X-series) algorithms depend on sub-algorithms. Before building, **trace the full dependency tree**:
+
+```
+Example: C01_recovery_score
+├── A01_heart_rate (Tier 0) — exists? ✓
+├── A02_hrv (Tier 1) — exists? ✗ (spec only)
+├── A23_sleep_detection (Tier 1) — exists? ✗
+└── X05_autonomic_balance (Tier 1) — exists? ✗
+    └── A02_hrv — (already listed)
+```
+
+**Resolution options (present to user):**
+1. **Build chain** — Build missing dependencies first, bottom-up. Recommended for production.
+2. **Build with stubs** — Generate the composite now with `// STUB: requires A02_hrv` placeholders. Faster for prototyping.
+3. **Start with a leaf** — Build the deepest missing dependency first, then revisit the composite.
+
+**Rule:** Never silently skip dependency checks. If a composite references `getHR()` or `getHRV()`, verify those algorithms exist and their output types match expectations.
+
+---
+
+## 2. HARDWARE TRUTH TABLE & DEFAULT PUCK CONFIGURATION
+
+### 2.1 Hardware Truth Table
+
+Cross-reference every algorithm against this table. If the spec claims data the hardware cannot provide, **flag it immediately**.
+
+```
+┌─────────────────────┬──────────────┬────────────┬─────────────┬──────────┬─────────┐
+│ Channel             │ Typical Chip │ Bus        │ Max Rate    │ Bits     │ Puck    │
+├─────────────────────┼──────────────┼────────────┼─────────────┼──────────┼─────────┤
+│ CH_PPG (Green LED)  │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
+│ CH_PPG (Red+IR LED) │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
+│ CH_ECG              │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
+│ CH_SKIN_TEMP        │ TMP117       │ Wire, 0x48 │ 1 Hz        │ 16-bit   │ Puck 2  │
+│ CH_EDA              │ ADS1115      │ Wire, 0x49 │ 10 Hz       │ 16-bit   │ Puck 2  │
+│ CH_BIOZ             │ AD5933       │ Wire, 0x0D │ On-demand   │ 12-bit   │ Puck 3  │
+│ CH_ACCEL            │ LSM6DS3TR    │ Wire1,0x6A │ 12.5–416 Hz │ 16-bit   │ XIAO    │
+│ CH_GYRO             │ LSM6DS3TR    │ Wire1,0x6A │ 12.5–416 Hz │ 16-bit   │ XIAO    │
+│ CH_MIC              │ PDM          │ Digital    │ 16000 Hz    │ 16-bit   │ XIAO    │
+└─────────────────────┴──────────────┴────────────┴─────────────┴──────────┴─────────┘
+```
+
+**PPG LED mode selection:**
+- **Green LED** — Use for heart rate, HRV, perfusion index. Better motion tolerance. Default for most algorithms.
+- **Red + IR LED** — Use for SpO2 (requires dual-wavelength ratio). Also used for vascular age, PPG waveform morphology.
+- The MAX86150 can switch modes programmatically. Specify the required mode in the spec.
+
+**IMU rate selection:**
+- LSM6DS3TR supports: 12.5, 26, 52, 104, 208, 416 Hz (higher rates available but rarely needed on wearable).
+- **Default: 50 Hz** (use `ODR_52Hz` register setting) — sufficient for step counting, activity recognition, sleep detection.
+- **High-rate: 104–208 Hz** — use for sport technique analysis (tennis serve, golf swing, running gait).
+- **Low-rate: 12.5–26 Hz** — use for long-duration monitoring where power savings matter (sleep, sedentary detection).
+
+### 2.2 Default Puck Configuration
+
+**ALWAYS start with Puck 1 + Puck 2 + XIAO onboard sensors.** This is the default recommendation for all algorithms. Only add Puck 3 when the algorithm explicitly requires bioimpedance.
+
+```
+DEFAULT CONFIG (covers ~90% of algorithms):
+┌─────────────────────────────────────────────────────────────┐
+│ XIAO (always present):  CH_ACCEL, CH_GYRO, CH_MIC          │
+│ Puck 1 (default):       CH_PPG, CH_ECG                     │
+│ Puck 2 (default):       CH_SKIN_TEMP, CH_EDA               │
+│                                                             │
+│ Available channels: PPG, ECG, Temp, EDA, Accel, Gyro, Mic  │
+│ → Enough for ALL health, sleep, stress, and motion algos   │
+└─────────────────────────────────────────────────────────────┘
+
+EXTENDED CONFIG (only when bioimpedance needed):
+┌─────────────────────────────────────────────────────────────┐
+│ + Puck 3:               CH_BIOZ                            │
+│                                                             │
+│ Use cases: Body fat %, muscle mass, hydration level         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Rule: Not every sensor needs to be used.** An algorithm declares ONLY the channels it actually reads. A heart rate algorithm uses CH_PPG and CH_ACCEL (for motion rejection) — it does NOT declare CH_EDA, CH_SKIN_TEMP, CH_MIC, etc., even though those sensors are physically present.
+
+---
+
+## 3. SENSOR VALIDATION ENGINE
+
+Before generating any spec, run these validation checks. **These are non-negotiable.** If the user requests a nonsensical sensor configuration, **explain the problem clearly and suggest the correct configuration.**
+
+### 3.1 Channel Requirement Matrix
+
+| Algorithm Type | Required Channels | Recommended Additions | Invalid Channels (explain if requested) |
+|---|---|---|---|
+| Heart rate / HRV | CH_PPG | CH_ACCEL (motion rejection) | CH_MIC — "Microphone captures audio, not cardiac rhythm. PPG measures blood volume changes via light." |
+| SpO2 | CH_PPG (Red + IR) | CH_ACCEL (motion rejection) | CH_MIC, CH_BIOZ — "SpO2 requires dual-wavelength optical measurement (red + infrared light ratio)." |
+| Blood pressure (PTT) | CH_PPG + CH_ECG | CH_ACCEL (motion rejection) | CH_MIC — "Blood pressure via PTT requires synchronized PPG+ECG to measure pulse transit time." |
+| ECG rhythm | CH_ECG | CH_ACCEL (motion artifact marking) | — |
+| EDA / Stress | CH_EDA | CH_PPG (HRV fusion for holistic stress) | CH_MIC — "Stress is measured via galvanic skin response (EDA), not sound." |
+| Temperature-based (fever, circadian, ovulation) | CH_SKIN_TEMP | — | CH_MIC — "Temperature is measured by thermistor, not derived from audio." |
+| Body composition | CH_BIOZ | — | CH_MIC — "Body composition requires bioimpedance (electrical impedance through tissue)." |
+| Step counting | CH_ACCEL | — | CH_MIC, CH_PPG — "Steps are detected from accelerometer peaks during walking motion." |
+| Activity recognition | CH_ACCEL + CH_GYRO | — | CH_MIC (unless audio context needed) |
+| Sport technique (swing, form, cadence) | CH_ACCEL + CH_GYRO | — | CH_MIC — "Racket swings, running form, and movement patterns are captured by the 6-axis IMU (accelerometer + gyroscope), not audio." |
+| Snoring / respiratory sounds | CH_MIC | CH_PPG (SpO2 for apnea screening) | CH_BIOZ — "Snoring is an audio phenomenon detected by the PDM microphone." |
+| Sleep detection | CH_ACCEL | CH_PPG (HR/HRV), CH_SKIN_TEMP, CH_EDA | — |
+| Composite scores | Varies — depends on sub-algorithms | — | — |
+
+### 3.2 Mandatory Pre-Flight Check
+
+Execute this checklist before generating any spec:
+
+```
+PRE-FLIGHT SENSOR VALIDATION:
+1. Map user's intent → required signal types
+2. Map signal types → channels from §3.1 matrix
+3. CHECK: No channel is included without justification
+4. CHECK: No critical channel is missing (compare against §3.1 Required)
+5. CHECK: If user explicitly requested a sensor that doesn't make sense:
+   → EXPLAIN clearly why it's wrong
+   → SUGGEST the correct channel(s) with rationale
+   → WAIT for user acknowledgment before proceeding
+6. ADD motion rejection: If algorithm uses CH_PPG or CH_ECG, add CH_ACCEL
+7. DEFAULT puck config: Puck 1 + Puck 2 + XIAO unless Puck 3 (CH_BIOZ) needed
+8. STRIP unused channels: Algorithm declares ONLY what it actually reads
+```
+
+### 3.3 Common Mistakes to Catch
+
+These are errors users commonly make. If detected, **correct them proactively with a clear explanation**:
+
+| User Says | Problem | Correct Response |
+|---|---|---|
+| "Heart rate from microphone" | Microphone captures sound, not cardiac rhythm | "Heart rate is measured via PPG (photoplethysmography) — Puck 1 shines light through skin and measures blood volume changes. You need CH_PPG, not CH_MIC." |
+| "Tennis swing detection with PPG" | PPG measures blood flow, not motion | "Racket swing detection needs the 6-axis IMU: CH_ACCEL + CH_GYRO on the XIAO. PPG can't detect arm angle or swing speed." |
+| "Stress from accelerometer" | Accelerometer measures motion, not autonomic nervous system | "Stress is measured via EDA (galvanic skin response from Puck 2) and/or HRV (from PPG on Puck 1). Accelerometer can distinguish stress from exercise but isn't the primary stress signal." |
+| "Body fat from temperature" | Temperature doesn't measure tissue composition | "Body composition requires bioimpedance (CH_BIOZ from Puck 3) — it sends a tiny current through tissue and measures impedance to estimate fat/muscle/water ratios." |
+| "SpO2 from ECG" | ECG measures electrical activity, SpO2 needs optical | "SpO2 requires dual-wavelength optical measurement (PPG Red + IR). ECG measures heart's electrical signals, not blood oxygen saturation." |
+| Algorithm uses 6 sensors but only actually needs 2 | Over-provisioning wastes power and complexity | "Your algorithm only processes accelerometer data for step counting. I've stripped the unused channels (PPG, ECG, EDA, Temp, Mic) to reduce power draw and complexity." |
+
+---
+
+## 4. AUTO MODE PIPELINE
+
+When the user describes an algorithm and provides enough information to build it:
+
+### 4.1 Sequence
+
+```
+Step 1: CLASSIFY
+  ├── Parse natural language description
+  ├── Category: health-biometric | sport-motion | hybrid
+  ├── Layer: base | cross-sensor | composite
+  └── Tier: 0 (realtime) | 1 (periodic) | 2 (on-demand) | 3 (off-device)
+
+Step 1.5: REGISTRY LOOKUP & DEPENDENCY CHECK
+  ├── Search algorithm_registry.md for existing/overlapping algorithms (§1.4)
+  ├── If match found → inform user, ask how to proceed
+  ├── If composite/cross-sensor → trace dependency tree (§1.5)
+  ├── If dependencies missing → present resolution options to user
+  └── Assign algorithm ID (core ID if planned, else next U-series)
+
+Step 2: VALIDATE SENSORS
+  ├── Select channels from §3.1 matrix
+  ├── Run pre-flight check (§3.2)
+  └── Determine puck configuration (§2.2)
+
+Step 3: SELECT ALGORITHM METHOD
+  ├── For HEALTH: pick proven, peer-reviewed method with citations
+  ├── For SPORT: pick validated biomechanical approach
+  ├── For HYBRID: pick appropriate method for each component
+  └── Always define at least 2 alternative methods with trade-offs
+
+Step 4: GENERATE SPEC
+  ├── Use spec template (§8)
+  ├── Fill every field — NO blanks, NO TODOs
+  ├── Include: parameters, SQI computation, edge cases, test scenarios
+  ├── Include: display configuration (§12)
+  └── Include: references with DOIs where available
+
+Step 5: ▶▶▶ CHECKPOINT — SHOW SPEC TO USER ◀◀◀
+  ├── Present the complete spec.md
+  ├── Say: "Here's the algorithm spec. Review it and confirm to proceed with building all files, or tell me what to change."
+  └── WAIT for user confirmation
+
+Step 6: BUILD (after user confirms)
+  ├── Generate all output files (§0.2)
+  ├── Update algorithm_registry.md
+  └── Report: list of created files with brief description
+```
+
+### 4.2 Classification Heuristics
+
+| User Describes | Category | Layer | Tier |
+|---|---|---|---|
+| "heart rate", "pulse", "HR", "BPM" | health-biometric | base | 0 (realtime) |
+| "HRV", "heart rate variability", "RMSSD" | health-biometric | base | 1 (periodic) |
+| "SpO2", "blood oxygen", "oxygen saturation" | health-biometric | base | 0 (realtime) |
+| "blood pressure", "BP", "PTT" | health-biometric | cross-sensor | 1 (periodic) |
+| "ECG", "EKG", "rhythm" | health-biometric | base | 2 (on-demand) |
+| "temperature", "fever", "ovulation" | health-biometric | base | 3 (off-device) |
+| "EDA", "stress", "GSR", "galvanic" | health-biometric | base | 1 (periodic) |
+| "body fat", "muscle mass", "hydration", "bioimpedance" | health-biometric | base | 2 (on-demand) |
+| "step count", "pedometer" | sport-motion | base | 0 (realtime) |
+| "activity recognition", "walking/running/cycling" | sport-motion | base | 1 (periodic) |
+| "tennis", "golf swing", "running form", "punch", "rowing" | sport-motion | base | 1 (periodic) |
+| "cadence", "stride", "gait" | sport-motion | base | 1 (periodic) |
+| "snoring", "cough", "respiratory sound" | health-biometric | base | 1 (periodic) |
+| "sleep stages", "sleep score" | hybrid | cross-sensor | 3 (off-device) |
+| "recovery score", "readiness" | hybrid | composite | 3 (off-device) |
+| "calorie burn", "energy expenditure" | hybrid | cross-sensor | 3 (off-device) |
+| "stress vs exercise" | hybrid | cross-sensor | 1 (periodic) |
+| "biological age", "health score" | hybrid | composite | 3 (off-device) |
+
+---
+
+## 5. GUIDED MODE PIPELINE
+
+When the user needs guidance or provides vague requirements:
+
+### 5.1 Round 1 — Intent & Scope
+
+Ask the user:
+
+```
+QUESTIONS FOR ROUND 1:
+1. "What do you want to measure or detect?"
+   → Free text. Examples: "heart rate during swimming", "tennis serve speed",
+     "stress level", "sleep quality", "running cadence"
+
+2. "What category best describes this?"
+   → Options:
+     a) Health vital sign (HR, SpO2, BP, temperature, HRV)
+     b) Stress / mental health (EDA, stress score, relaxation)
+     c) Sleep analysis (phases, quality, snoring)
+     d) Sport / movement technique (swing form, cadence, reps)
+     e) Activity / fitness (steps, calories, activity type)
+     f) Body composition (fat %, muscle, hydration)
+     g) Composite score (combines multiple metrics)
+     h) Something else (describe)
+
+3. "Should this run in real-time on the device, or is it OK to compute
+    after data collection (e.g., in the dashboard)?"
+   → Options:
+     a) Real-time — I need instant feedback (Tier 0-1)
+     b) On-demand — user triggers it manually (Tier 2)
+     c) After-the-fact — computed from stored data (Tier 3)
+     d) Not sure — help me decide
+```
+
+After Round 1: classify the algorithm using §1.1 Category Router.
+
+### 5.2 Round 2 — Sensors & Hardware
+
+AI pre-fills recommendations based on Round 1, then presents for confirmation:
+
+```
+ROUND 2 FORMAT:
+"Based on your description, here's what I recommend:
+
+  Channels:  CH_ACCEL + CH_GYRO (XIAO onboard IMU)
+  Puck config: Puck 1 + Puck 2 + XIAO (default — but this algorithm
+               only uses the XIAO's IMU)
+  Why: Tennis forehand detection is a movement pattern. The 6-axis IMU
+       captures arm acceleration (CH_ACCEL) and rotational velocity
+       (CH_GYRO) at 50 Hz — enough to distinguish forehand from
+       backhand and measure swing metrics.
+
+  Does this look right? Want to add or change any sensors?"
+```
+
+**VALIDATION IN ROUND 2:**
+- If the user suggests a sensor that doesn't match the algorithm type → explain why and suggest correct alternative (use §3.3 mistake table)
+- If the user agrees with recommendation → proceed to Round 3
+- If the user adds sensors → validate each addition before accepting
+
+### 5.3 Round 3 — Algorithm Method
+
+AI proposes 2–3 proven methods:
+
+```
+ROUND 3 FORMAT:
+"For [algorithm], here are proven approaches:
+
+  Method A: [Name]
+  • How it works: [1-2 sentence description]
+  • Proven in: [citation]
+  • Pros: [trade-off]
+  • Cons: [trade-off]
+  ★ Recommended for your use case
+
+  Method B: [Name]
+  • How it works: [1-2 sentence description]
+  • Proven in: [citation]
+  • Pros: [trade-off]
+  • Cons: [trade-off]
+
+  Which method do you prefer? Or should I go with the recommended one?"
+```
+
+For HEALTH algorithms: methods MUST come from peer-reviewed literature.
+For SPORT algorithms: methods can come from biomechanics literature or validated IMU analysis techniques.
+
+### 5.4 Round 4 — Parameters & Edge Cases
+
+AI pre-fills from the chosen method, presents key parameters:
+
+```
+ROUND 4 FORMAT:
+"Here are the key parameters with recommended defaults:
+
+  | Parameter | Default | Range | Why |
+  |-----------|---------|-------|-----|
+  | ... | ... | ... | ... |
+
+  And the edge cases I'll handle:
+  | Condition | Behavior |
+  |-----------|----------|
+  | ... | ... |
+
+  Anything you'd like to adjust, or shall I proceed with these defaults?"
+```
+
+**VALIDATION IN ROUND 4:**
+- If user sets extreme parameter values → warn with context (e.g., "SQI threshold of 0.95 means the algorithm will suppress output almost always — most algorithms use 0.3–0.6")
+- Accept reasonable customizations without pushback
+
+### 5.5 Round 5 — Review & Confirm
+
+Present the complete spec. Same checkpoint as Auto Mode Step 5:
+
+```
+"Here's the complete algorithm specification. Review it carefully:
+
+[... full spec.md content ...]
+
+Confirm to proceed with building all files, or tell me what to change."
+```
+
+On confirmation → build all files (same as Auto Mode Step 6).
+
+---
+
+## 6. MEDICAL CORRECTNESS RULES
+
+These rules apply to ALL `health-biometric` and `hybrid` algorithms. They are **non-negotiable**.
+
+### 6.1 Every Formula Must Have a Citation
 
 No formula appears in code without a comment citing its source:
 
@@ -72,383 +508,400 @@ Acceptable citation sources (in order of preference):
 
 **Unacceptable sources:** Blog posts, Stack Overflow, ChatGPT-generated formulas, uncited "common knowledge."
 
-### 2.2 Physiological Range Clamping
+### 6.2 Physiological Range Clamping
 
-Every output MUST be hard-clamped to physiologically possible ranges. If a calculation produces a value outside these ranges, the algorithm MUST discard it and either hold the last valid value or output zero/NaN.
+Every health output MUST be hard-clamped to physiologically possible ranges:
 
 ```
-Heart Rate:        30–220 BPM     (below 30 = asystole, above 220 = age-dependent max)
-SpO2:              70–100 %       (below 70 = severe hypoxemia, usually sensor error)
+Heart Rate:        30–220 BPM
+SpO2:              70–100 %
 Respiratory Rate:  4–60 breaths/min
 Blood Pressure:    SBP 60–250, DBP 30–150 mmHg
-Skin Temperature:  25–42 °C       (below = hypothermia, above = severe fever)
-HRV RMSSD:         0–300 ms       (above 300 = likely artifact)
-EDA:               0.01–100 µS    (above = electrode error)
-SpO2 R-ratio:      0.2–2.0        (outside = sensor saturation)
-PTT:               100–500 ms     (outside = motion artifact or electrode issue)
+Skin Temperature:  25–42 °C
+HRV RMSSD:         0–300 ms
+EDA:               0.01–100 µS
+SpO2 R-ratio:      0.2–2.0
+PTT:               100–500 ms
 ```
 
-### 2.3 Signal Quality Index (SQI)
+### 6.3 Signal Quality Index (SQI)
 
-Every real-time algorithm MUST compute a Signal Quality Index (0.0 – 1.0) alongside its output. The SQI gates downstream algorithms:
+Every real-time algorithm MUST compute an SQI (0.0–1.0) alongside its output:
 
 ```cpp
 struct AlgorithmOutput {
-    float value;       // The computed metric
-    float sqi;         // 0.0 = garbage, 1.0 = perfect signal
-    uint32_t timestamp_ms;
-    bool valid;        // false = suppress display, show "--"
+    float    value;          // The computed metric
+    float    sqi;            // 0.0 = garbage, 1.0 = perfect signal
+    uint32_t timestamp_ms;   // millis() at computation time
+    bool     valid;          // false = suppress display, show "--"
 };
 ```
 
 **SQI computation methods by sensor:**
-- **PPG**: Perfusion index > threshold + waveform morphology check + motion energy < threshold
+- **PPG**: Perfusion index + waveform morphology + motion energy
 - **ECG**: R-peak SNR > 3dB + baseline wander < 0.5mV + electrode impedance < 50kΩ
 - **EDA**: Signal variance within expected range + no rail-to-rail saturation
 - **IMU**: Sensor self-test pass + no clipping at ±16g
 - **Temperature**: Rate of change < 2°C/min (faster = sensor detached)
 
-When SQI falls below the algorithm's specific **SQI Threshold** (defined in its spec): **suppress the output entirely** (show "--"). Don't show bad data — this is where consumer trackers fail. Whoop shows "recovering" when signal is bad; we show nothing, which is more honest. 
+When SQI falls below the algorithm's specific **SQI Threshold** → **suppress the output entirely** (show "--"). Don't show bad data.
 
-*Note: Global thresholds do not work. SpO2 is extremely motion-sensitive and needs SQI ≥ 0.6. Heart rate is more robust and only needs SQI ≥ 0.3.*
+*SQI thresholds are algorithm-specific. SpO2 needs ≥ 0.6. Heart rate only needs ≥ 0.3.*
 
-### 2.4 Confidence Intervals
+### 6.4 Confidence Intervals
 
-Where applicable, report not just a point estimate but a confidence range:
+Where applicable, report confidence range (not just point estimate):
 
 ```cpp
 struct CalibratedOutput {
-    float value;       // Point estimate (e.g., SBP = 120)
-    float ci_low;      // 95% CI lower (e.g., 115)
-    float ci_high;     // 95% CI upper (e.g., 125)
+    float value;       // Point estimate
+    float ci_low;      // 95% CI lower bound
+    float ci_high;     // 95% CI upper bound
     float sqi;
-    bool calibrated;   // false = needs user calibration
+    uint32_t timestamp_ms;
+    bool  valid;
+    bool  calibrated;           // false = "Calibration needed"
+    uint32_t calibration_age_ms;
 };
 ```
 
-This applies to: Blood pressure (X01), SpO2 (A03), VO2max estimation, biological age (X12).
-This does NOT apply to: Heart rate, step count, temperature (direct measurements).
+Applies to: Blood pressure, SpO2, VO2max, biological age.
+Does NOT apply to: Heart rate, step count, temperature (direct measurements).
 
-### 2.5 Calibration Transparency
+### 6.5 Calibration Transparency
 
-Some algorithms require user calibration (e.g., blood pressure PTT needs a reference cuff reading). The algorithm MUST:
+Algorithms requiring calibration (e.g., BP PTT) MUST:
+1. Clearly state calibration status in output
+2. Refuse clinical-grade output when uncalibrated (show "Calibration needed")
+3. Track calibration age — prompt recalibration after 14 days
+4. Never silently degrade
 
-1. **Clearly state** in its output whether it is calibrated or uncalibrated
-2. **Refuse to output** clinical-grade values when uncalibrated (show "Calibration needed")
-3. **Track calibration age** — recalibrate prompt after 14 days or significant body change
-4. **Never silently degrade** — if calibration data is stale, say so
-
-### 2.6 Regulatory Awareness
-
-OpenPulse is NOT a medical device. Every algorithm MUST be classified:
+### 6.6 Regulatory Classification
 
 | Classification | Meaning | UI Treatment |
 |---|---|---|
-| **Wellness** | General fitness metric (steps, calories, sleep) | Show normally |
+| **Wellness** | General fitness (steps, calories, sleep) | Show normally |
 | **Health Indicator** | Physiological insight (HRV, EDA stress) | Show with context |
 | **Health Screening** | Clinical-adjacent (SpO2, BP, ECG rhythm) | Show with disclaimer |
+| **Sport Performance** | Movement technique / athletic metrics | Show normally |
 
-For **Health Screening** algorithms, the firmware output struct includes a `disclaimer` flag, and the dashboard MUST display: *"This is not a medical device. Consult a healthcare provider for medical decisions."*
+For **Health Screening**: dashboard MUST display: *"This is not a medical device. Consult a healthcare provider for medical decisions."*
 
-### 2.7 Algorithm Dependency Graph
+### 6.7 Algorithm Dependency Graph
 
-Every algorithm explicitly declares its dependencies **and its outputs**, mapping what it consumes and what consumes it. This forms a pipeline architecture (Reference: BioSPPy pipeline dependency graphs, Bota et al. 2024).
+Every algorithm declares what it **Consumes** and what **Consumed by** it. This forms a pipeline architecture (Reference: BioSPPy pipeline, Bota et al. 2024).
 
-For example, `A01_heart_rate`:
+Example — `A01_heart_rate`:
 - **Consumes**: `CH_PPG`
 - **Outputs**: `float bpm`
-- **Consumed by**: `A02` (HRV), `A24` (Calories), `X01` (PTT-BP), `C01` (Recovery Score)
-
-This explicit mapping prevents cyclic dependencies and ensures the pipeline scheduler executes algorithms in the correct topological order.
+- **Consumed by**: `A02` (HRV), `A24` (Calories), `X01` (PTT-BP), `C01` (Recovery)
 
 ---
 
-## 3. PRIVACY & DATA RULES
+## 7. SPORT & MOTION CORRECTNESS RULES
 
-### 3.1 On-Device Processing
+These rules apply to ALL `sport-motion` algorithms and the motion components of `hybrid` algorithms.
 
-**ALL signal processing and algorithm computation happens on-device** (nRF52840 or dashboard browser). Never:
+### 7.1 Movement Feature Extraction Standards
+
+For IMU-based motion algorithms, use these standardized feature extraction methods:
+
+**Time-domain features** (always include):
+- Mean, variance, RMS of each axis
+- Peak acceleration magnitude
+- Zero-crossing rate
+- Signal magnitude area (SMA): `SMA = (1/N) × Σ(|ax| + |ay| + |az|)`
+
+**Frequency-domain features** (when periodicity matters — cadence, gait, swing):
+- Dominant frequency via FFT or autocorrelation
+- Spectral energy in relevant bands
+- Frequency ratio between bands
+
+**Orientation features** (when body position matters):
+- Gravity-separated acceleration: `a_dynamic = a_total - a_gravity`
+- Rotation integration from gyroscope (short windows only — drift accumulates)
+- Quaternion estimation for orientation-dependent algorithms
+
+### 7.2 Sport Algorithm Validation
+
+Sport algorithms MUST define:
+1. **Ground truth method**: How to verify the algorithm is correct (e.g., video analysis, manual counting, force plate)
+2. **Accuracy target**: Specific metric with tolerance (e.g., "Rep count within ±1 rep per set", "Cadence within ±3 SPM")
+3. **Test scenarios**: At minimum — normal execution, boundary speed/intensity, idle/no-motion, mixed/transitional movements
+
+### 7.3 Range Checking (instead of physiological clamping)
+
+Sport outputs don't have physiological limits like health metrics, but they DO have sensible ranges:
+
+```
+Step cadence:      0–250 SPM (above = probably vehicle vibration)
+Running cadence:   120–220 SPM
+Swing count:       0–200 per session
+Rep count:         0–100 per set
+Movement velocity: 0–50 m/s (above = likely sensor error)
+Rotation rate:     0–2000 °/s (IMU hardware limit)
+```
+
+Algorithms MUST range-check outputs and suppress values outside sensible bounds.
+
+---
+
+## 8. PRIVACY & DATA RULES
+
+**ALL signal processing happens on-device** (nRF52840 or browser). Never:
 - Send raw sensor data to any server
-- Include PII (name, age, weight) in BLE payloads
-- Require an internet connection for any algorithm to function
+- Include PII in BLE payloads
+- Require internet for any algorithm to function
 - Phone-home, beacon, or transmit analytics
 
-### 3.2 BLE Payload Rules
-
-- BLE characteristics contain **only computed float values** (4 bytes per metric)
-- No user identifiers in BLE advertising data
-- Device name is generic ("SensorDash"), not personalized
-- No location data transmitted
-
-### 3.3 Data At Rest
-
-- User calibration data (height, weight, age, cuff BP) is stored in **browser localStorage only**
-- No cookies, no server-side storage, no cloud sync
-- User can delete all data via a single "Clear Data" button
-- Exported PDFs contain only the data the user explicitly chose to export
-
-### 3.4 Informed Consent
-
-The dashboard MUST explain what each sensor measures before first use. No silent data collection.
+BLE characteristics contain **only computed float values** (4 bytes per metric). Device name is generic ("OpenPulse"). User calibration data in **browser localStorage only**. User can delete all data via "Clear Data" button.
 
 ---
 
-## 4. FIRMWARE ENGINEERING RULES
+## 9. FIRMWARE ENGINEERING RULES
 
-### 4.1 Memory Safety (nRF52840: 256KB RAM)
+### 9.1 Memory Safety (nRF52840: 256KB RAM)
 
 ```
 HARD RULES:
-- No dynamic allocation (malloc/new) in loop() — ALL buffers allocated at compile time
+- No dynamic allocation (malloc/new) in loop() — ALL buffers at compile time
 - No String class — use char[] with bounds checking
 - No recursion — stack is only 8KB
 - No double — use float (saves 50% RAM on Cortex-M4)
 - No printf/sprintf — use Serial.print() chains
-- Maximum total algorithm RAM budget: 16KB (rest for BLE stack + drivers)
+- Maximum total algorithm RAM budget: 16KB
 ```
 
-### 4.2 Ring Buffer Pattern
+### 9.2 Ring Buffer Pattern
 
-Every sensor and algorithm uses the shared ring buffer type:
+Every sensor and algorithm uses `RingBuffer<T, N>` from `firmware/src/framework/RingBuffer.h`. Buffer sizes from the spec's window requirement:
 
-```cpp
-template<typename T, uint16_t N>
-class RingBuffer {
-public:
-    void push(T sample, uint32_t timestamp_ms);
-    T    latest() const;
-    T    at(uint16_t index) const;       // 0 = newest
-    uint32_t timestampAt(uint16_t index) const;
-    uint16_t count() const;
-    bool full() const;
-    void clear();
+| Use Case | N | Memory |
+|----------|---|--------|
+| PPG peak detection | 512 (5.12s @ 100 Hz) | 2KB |
+| HRV R-R intervals | 128 (~2 minutes) | 1KB |
+| EDA | 64 (6.4s @ 10 Hz) | 256B |
+| Temperature | 16 (16s @ 1 Hz) | 64B |
+| IMU motion features | 256 (5.12s @ 50 Hz) | 2KB |
 
-    // Statistical helpers
-    float mean() const;
-    float min() const;
-    float max() const;
-    float rms() const;
+### 9.3 Algorithm Base Class
 
-    // Cross-sensor interpolation
-    float interpolateAt(uint32_t target_ms) const;
-
-private:
-    T        data_[N];
-    uint32_t timestamps_[N];
-    uint16_t head_ = 0;
-    uint16_t count_ = 0;
-};
-```
-
-Buffer sizes are determined by the algorithm's window requirement:
-- Heart rate peak detection: 512 samples (5.12s at 100 Hz) = 2KB
-- HRV R-R intervals: 128 intervals (~2 minutes) = 1KB
-- EDA: 64 samples (6.4s at 10 Hz) = 256B
-- Temperature: 16 samples (16s at 1 Hz) = 64B
-
-### 4.3 Algorithm Base Class
-
-Every algorithm inherits from this interface:
+Every algorithm inherits from `AlgorithmBase` defined in `firmware/src/framework/AlgorithmBase.h`:
 
 ```cpp
-enum class AlgoState : uint8_t {
-    IDLE,           // Not started, no data
-    ACQUIRING,      // Collecting initial data, not yet valid
-    VALID,          // Outputting valid data
-    LOW_QUALITY,    // Signal poor, output suppressed
-    CALIBRATING,    // Awaiting user calibration
-    ERROR           // Hardware fault
-};
-
 class AlgorithmBase {
 public:
     virtual void init() = 0;
-    virtual void update(uint32_t now_ms) = 0;   // Called by scheduler
+    virtual void update(uint32_t now_ms) = 0;
     virtual AlgorithmOutput getOutput() const = 0;
     virtual AlgoState getState() const = 0;
+    virtual const char* getID() const = 0;
     virtual const char* getName() const = 0;
     virtual const char* getUnit() const = 0;
-
-    // Memory reporting for debug
+    virtual AlgoClassification getClassification() const = 0;
+    virtual AlgoTier getTier() const = 0;
     virtual uint16_t ramUsage() const = 0;
 };
 ```
 
-### 4.4 Execution Tiers
+### 9.4 Execution Tiers
 
-Algorithms are assigned to tiers at compile time:
+| Tier | Name | When Called | Time Budget | RAM Budget |
+|------|------|------------|-------------|------------|
+| 0 | REALTIME | Every `loop()` | < 200µs | < 2KB |
+| 1 | PERIODIC | Fixed interval (scheduler) | < 1ms | < 4KB |
+| 2 | ON_DEMAND | User-triggered | < 10ms | < 8KB |
+| 3 | OFF_DEVICE | Browser JS only | Unlimited | Unlimited |
 
-```cpp
-// Tier 0: ALWAYS ON — called every loop() iteration
-// Budget: < 200µs per call, < 2KB RAM total
-// Examples: HR peak detect, step counter accel sampling
-#define ALGO_TIER_REALTIME    0
-
-// Tier 1: PERIODIC — called by scheduler at fixed intervals
-// Budget: < 1ms per call, < 4KB RAM total
-// Examples: HRV (every R-R), SpO2 (every beat), EDA (100ms)
-#define ALGO_TIER_PERIODIC    1
-
-// Tier 2: ON-DEMAND — user-initiated, allocated/freed dynamically
-// Budget: < 10ms per call, < 8KB RAM (freed after use)
-// Examples: ECG rhythm check, bioimpedance scan, vascular age
-#define ALGO_TIER_ONDEMAND    2
-
-// Tier 3: OFF-DEVICE — computed in dashboard/app, not on MCU
-// Budget: unlimited (browser JS)
-// Examples: Composite scores, biological age, PDF reports
-#define ALGO_TIER_OFFDEVICE   3
-```
-
-### 4.5 Non-Blocking Execution
-
-No algorithm call may block for more than **1ms**. Specifically:
+### 9.5 Non-Blocking Execution
 
 - No `delay()` inside any algorithm
 - No `while()` waiting for sensor data — use state machines
-- I2C reads must be split: request in one call, read in the next
-- BLE.poll() must be called between any two sensor reads
+- I2C reads split: request in one call, read in the next
+- BLE.poll() between sensor reads
 
-### 4.6 Motion Artifact Rejection
+### 9.6 Motion Artifact Rejection
 
-Any algorithm using PPG or ECG MUST calculate a continuous motion level from the IMU before trusting the signal:
+Any algorithm using PPG or ECG MUST compute continuous motion level from IMU:
 
 ```cpp
-// Called to compute motion intensity (0.0 = still, 1.0 = heavy motion)
 float computeMotionLevel(uint32_t now_ms) {
     float accelMag = sqrt(ax*ax + ay*ay + az*az);
-    float motion_g = abs(accelMag - 1.0f); // Deviation from 1g gravity
-    
-    // Scale to 0.0-1.0 based on physiological maximums
-    return min(motion_g / 2.0f, 1.0f);
+    float motion_g = abs(accelMag - 1.0f);
+    return min(motion_g / 2.0f, 1.0f);  // 0.0=still, 1.0=heavy motion
 }
 ```
 
-The computed `motion_level` acts as a penalty factor in the SQI calculation. Sensitivity varies by algorithm (Reference: HeartPy van Gent et al. 2019):
-- **SpO2**: Unusable > 0.3g motion. SQI drops rapidly.
-- **Heart Rate**: Robust up to 1.0g motion using adaptive filtering.
+Sensitivity varies:
+- **SpO2**: Suppress > 0.3g motion (extremely motion-sensitive)
+- **Heart Rate**: Robust up to 1.0g with adaptive filtering
+- **ECG**: Mark as "motion artifact" in rhythm analysis
+- **PTT/BP**: Suppress entirely during motion
 
-When motion exceeds the algorithm's tolerance:
-- **HR**: Hold last valid value for up to 5 seconds, then show "--"
-- **SpO2**: Suppress immediately (SpO2 is extremely motion-sensitive)
-- **ECG**: Mark segment as "motion artifact" in rhythm analysis
-- **PTT/Blood Pressure**: Suppress entirely during motion
+### 9.7 Sensor Manager & Hardware Modes
 
-### 4.7 Sensor Manager & Hardware Modes
+The `SensorManager` orchestrates physical chip configurations. When on-demand algorithms activate, it transitions the chip (e.g., MAX86150 from PPG_ONLY to PPG_AND_ECG). Prevents conflicts by halting lower-priority algorithms.
 
-A central `SensorManager` sits above the algorithms and orchestrates the physical chip configurations. When an on-demand algorithm is activated, it requests a hardware mode shift:
+### 9.8 Multi-Output Algorithms
 
-- If `A05_ecg_rhythm` (on-demand) starts, the `SensorManager` transitions the MAX86150 from `PPG_ONLY` to `PPG_AND_ECG`.
-- The FIFO configuration and interrupt watermarks change.
-- The `SensorManager` prevents conflicts if multiple algorithms demand the same chip in mutually exclusive states, automatically halting lower-priority Tier 1/2 algorithms in favor of user-initiated Tier 2 algorithms.
+Some algorithms produce more than one metric (e.g., running form → cadence + ground contact time + vertical oscillation, or body composition → fat % + muscle mass + hydration). The framework's `getOutput()` returns a single `float`. Use these patterns for multi-output:
+
+**Pattern A: Primary + Secondary Getters (preferred)**
+```cpp
+class Algo_U05_RunningForm : public AlgorithmBase {
+  float cadence_, gct_, vertOsc_;
+public:
+  float getOutput() override { return cadence_; }  // Primary metric
+  float getGCT()     const { return gct_; }        // Secondary
+  float getVertOsc() const { return vertOsc_; }     // Secondary
+};
+```
+BLE: Primary metric uses the standard characteristic. Secondary metrics use a custom BLE characteristic or a packed byte array on a single characteristic.
+
+**Pattern B: Packed struct (for Tier 3 off-device)**
+```cpp
+struct RunningFormResult {
+  float cadence;
+  float gct_ms;
+  float vert_osc_cm;
+};
+```
+Tier 3 algorithms compute on the companion app and can return structured objects directly — no single-float constraint.
+
+**Rule:** Declare all output metrics in the spec under `## Output Metrics` with units, ranges, and which is the primary `getOutput()` value.
 
 ---
 
-## 5. SIGNAL PROCESSING RULES
+## 10. SIGNAL PROCESSING RULES
 
-### 5.1 Filter Design
-
-All filters must respect Nyquist:
+### 10.1 Filter Design
 
 ```
-Filter cutoff must be < (sample_rate / 2)
-Anti-aliasing: Apply low-pass BEFORE downsampling
-DC removal: High-pass at 0.1 Hz for PPG, 0.5 Hz for ECG
-Powerline: Optional notch at 50/60 Hz for ECG (auto-detect from spectrum)
+- Filter cutoff < (sample_rate / 2) — Nyquist
+- Apply low-pass BEFORE downsampling
+- DC removal: high-pass at 0.1 Hz for PPG, 0.5 Hz for ECG
+- Powerline: optional notch at 50/60 Hz for ECG
+- Use IIR (Butterworth) on MCU — FIR is too expensive
+- Pre-compute coefficients — include design params in comments
 ```
 
-Use **IIR filters** (Butterworth) for real-time on MCU — FIR filters use too much RAM.
+Generate filter coefficients with `tools/filter_designer.py`:
+```bash
+python3 tools/filter_designer.py --preset ppg
+```
 
-Coefficients must be pre-computed (not computed at runtime). Include the design parameters in comments:
+### 10.2 Multi-Method Peak Detection
 
+Every peak-detection algorithm defines at least 2 alternative methods:
+
+**PPG:**
+1. HeartPy Adaptive Moving Average (van Gent et al. 2019) — robust against noise
+2. NeuroKit2 Gradient-Based (Makowski et al. 2021) — low latency, less robust
+
+**ECG:**
+1. Pan-Tompkins (1985) — gold standard, robust, higher latency
+2. Hamilton (2002) — faster, less accurate during arrhythmias
+
+### 10.3 PPG Nomenclature
+
+Use standardized pyPPG nomenclature (Charlton et al. 2024):
+- **S**: Systolic Peak, **DN**: Dicrotic Notch, **D**: Diastolic Peak
+- SDPPG waves: **a** (initial systole), **b** (deceleration), **c** (late systole), **d** (early diastole), **e** (late diastole)
+
+### 10.4 EDA Decomposition
+
+Use **cvxEDA** for tonic/phasic separation (Greco et al. 2016).
+
+### 10.5 Sleep Staging
+
+Standard **30-second epochs**. Classify each epoch as Wake/Light/Deep/REM using HR mean, HRV RMSSD, IMU RMS, Temp Delta, EDA Variance. MCU: weighted rule-based. Dashboard: ML classification.
+
+### 10.6 Cross-Sensor Timestamp Alignment
+
+Always interpolate to the fastest clock:
 ```cpp
-// 4th-order Butterworth bandpass, 0.5–4.0 Hz
-// Designed for 100 Hz sample rate (PPG)
-// Generated with scipy.signal.butter(4, [0.5, 4.0], btype='band', fs=100)
-const float b[] = { ... };
-const float a[] = { ... };
-```
-
-### 5.2 Multi-Method Peak Detection
-
-Do NOT use a single hardcoded peak detection method. Every algorithm must define at least two alternative methods with distinct trade-offs. The algorithm or the developer chooses the best method based on signal quality.
-
-**For PPG:**
-1. **HeartPy Adaptive Moving Average**: Standard method, highly robust against noise. Uses a 0.75s moving average window to establish dynamic thresholds. (Reference: van Gent et al. 2019 "HeartPy: A novel heart rate algorithm for the analysis of noisy signals").
-2. **NeuroKit2 Gradient-Based**: Faster, lower latency, but less robust to artifact. (Reference: Makowski et al. 2021).
-
-**For ECG:**
-1. **Pan-Tompkins Algorithm**: The gold standard. Higher latency due to integration windows, but robust. (Reference: Pan & Tompkins 1985).
-2. **Hamilton Algorithm**: Computationally faster, but less accurate during certain arrhythmias. (Reference: Hamilton 2002).
-
-### 5.3 Standardized PPG Feature Nomenclature
-
-All algorithms operating on the PPG waveform MUST use the following standardized pyPPG nomenclature (Reference: Charlton et al. 2024 "pyPPG toolbox"):
-- **S**: Systolic Peak
-- **DN**: Dicrotic Notch
-- **D**: Diastolic Peak
-
-And the five points of the Second Derivative of PPG (SDPPG):
-- **a-wave**: Initial systole
-- **b-wave**: Deceleration
-- **c-wave**: Late systole
-- **d-wave**: Early diastole
-- **e-wave**: Late diastole
-
-### 5.4 EDA Decomposition and Sleep Staging
-
-**EDA Decomposition:**
-When separating tonic and phasic components of Electrodermal Activity, use **cvxEDA** as the reference methodology for isolating the Skin Conductance Level (SCL) and Skin Conductance Response (SCR). (Reference: Greco et al. 2016 "cvxEDA: A Convex Optimization Approach to EDA Processing", or Benedek & Kaernbach 2010).
-
-**Sleep Staging:**
-Sleep staging MUST occur in standard **30-second epochs**. Each epoch is classified as Wake, Light, Deep, or REM based on:
-- HR mean
-- HRV (RMSSD)
-- Continuous IMU RMS (motion energy)
-- Temperature Delta
-- EDA Variance
-
-For the MCU, use a weighted rule-based system. On the dashboard, use Machine Learning classification. (Reference: Whoop/Oura standard 30s epochs, reaching ~79% PSG agreement).
-
-### 5.5 Cross-Sensor Timestamp Alignment
-
-When combining data from sensors at different rates, **always interpolate to the fastest clock**:
-
-```cpp
-// Example: Aligning EDA (10 Hz) with PPG (100 Hz)
-// For each PPG sample timestamp, find the closest EDA value
 float alignedEDA = edaBuffer.interpolateAt(ppgTimestamp);
 ```
-
 Never assume sensors are synchronized — always use `millis()` timestamps.
 
-### 5.6 Baseline Estimation (Oura Model)
+### 10.7 Baseline Estimation
 
-For metrics that need a personal baseline (temperature, HRV, resting HR), implement an Oura-style dual-horizon baseline model (Reference: Oura Readiness Contributors documentation):
+Oura-style dual-horizon model:
+1. **Short-term (14-day)**: Exponential decay weighted average (α = 0.15)
+2. **Long-term (2-month)**: Unweighted median
 
-1. **Short-Term Baseline (Acute)**: 14-day weighted average, where the most recent 2–5 days are weighted heavily using exponential decay (α = 0.15).
-2. **Long-Term Baseline (Chronic)**: 2-month unweighted median.
+Days 1–3: "Gathering baseline..." → Day 4: preliminary values → Day 14: confident scores.
 
-All "deviation" calculations (e.g. Temperature Delta) are computed by comparing the Short-Term Baseline against the Long-Term Baseline.
+### 10.8 SpO2-Specific Signal Processing
 
-**Wait Times and UI Presentation:**
-- **Days 1–3**: Collecting data. Show "Gathering baseline..."
-- **Day 4**: Show preliminary values with a "Will get more accurate" indicator.
-- **Day 14**: Show full, confident scores. (Reference: Whoop Recovery wait times).
+SpO2 requires dual-wavelength PPG (Red + IR LEDs). The MAX86150 must be configured in **Red+IR mode** (not Green LED mode used for HR).
+
+**Processing pipeline:**
+1. **LED sequencing** — Red and IR LEDs alternate. Separate the interleaved samples into red[] and ir[] arrays.
+2. **AC/DC separation** — For each channel: DC = low-pass filtered signal (< 0.5 Hz), AC = bandpass filtered (0.5–5 Hz). Use the same filter structure as §10.1.
+3. **R-ratio calculation** — `R = (AC_red / DC_red) / (AC_ir / DC_ir)`. This is the core measurement.
+4. **SpO2 lookup** — `SpO2 = 110 - 25 * R` (linear approximation). For production, use a calibration curve (polynomial or lookup table from clinical validation).
+5. **Window averaging** — Average R over 4–8 second windows (4–8 heartbeats). Single-beat SpO2 is too noisy.
+6. **Motion sensitivity** — SpO2 is extremely motion-sensitive. Require SQI > 0.7 (stricter than HR). During motion, either suppress output or flag as low-confidence.
+7. **Physiological clamp** — Valid range: 70–100%. Below 70% is sensor error, not hypoxia.
+
+### 10.9 Sensor Fusion Methods
+
+When an algorithm combines data from multiple sensor modalities, use one of these fusion strategies:
+
+**Method 1: Normalized Weighted Score (for composite scores)**
+```
+score = w1 * normalize(metric1) + w2 * normalize(metric2) + ... + wN * normalize(metricN)
+where normalize(x) = (x - baseline) / (max - baseline), clamped to [0, 1]
+```
+Use for: recovery score, biological age, sleep score. Weights should be justified by literature or user-configurable.
+
+**Method 2: Rule-Based State Machine (for state detection)**
+```
+State transitions based on thresholds across multiple signals:
+  IF hr < resting_hr + 10 AND movement < 0.1g AND eda_slope < 0 → RESTING
+  IF hr > zone2_threshold AND movement > 1.5g → EXERCISE
+  IF hr elevated AND movement low AND eda rising → STRESS
+```
+Use for: stress-vs-exercise discrimination, sleep stage detection, activity state classification.
+
+**Method 3: Deviation Aggregation (for anomaly/trend detection)**
+```
+anomaly_score = Σ |metric_i - baseline_i| / std_i
+```
+Use for: illness warning, overtraining detection, anomaly alerts. Each metric's deviation from its personal baseline contributes proportionally.
 
 ---
 
-## 6. CODE GENERATION PROCEDURE
+## 11. CODE GENERATION PROCEDURE
 
-When generating code for an algorithm, follow this exact sequence:
+When generating code after spec confirmation, follow this exact sequence:
 
-### Step 1: Generate `firmware.h`
+### Step 1: Assign ID
+
+- If the algorithm is a core A/X/C algorithm → use the pre-assigned ID from registry
+- If it's a user algorithm → assign next U-series ID (scan `algorithms/U*/` for max)
+
+### Step 2: Create algorithm directory
+
+```
+algorithms/<ID>_<snake_case_name>/
+```
+
+### Step 3: Generate `spec.md`
+
+Use the spec template from §13. Every field must be filled — no blanks, no TODOs.
+
+### Step 4: Generate `Algo_<ID>.h` (firmware header)
+
+Use the firmware header template. Key structure:
 
 ```cpp
 #pragma once
-#include "AlgorithmBase.h"
-#include "RingBuffer.h"
-// Include dependency headers
+#include "../../framework/AlgorithmBase.h"
+#include "../../framework/RingBuffer.h"
+#include "../../framework/Channels.h"
+// Include dependency algorithm headers if any
 
 class Algo_<ID> : public AlgorithmBase {
 public:
@@ -456,31 +909,35 @@ public:
     void update(uint32_t now_ms) override;
     AlgorithmOutput getOutput() const override;
     AlgoState getState() const override;
-    const char* getName() const override { return "<HumanName>"; }
+    const char* getID() const override { return "<ID>"; }
+    const char* getName() const override { return "<Human Name>"; }
     const char* getUnit() const override { return "<unit>"; }
+    AlgoClassification getClassification() const override {
+        return AlgoClassification::<WELLNESS|HEALTH_INDICATOR|HEALTH_SCREENING>;
+    }
+    AlgoTier getTier() const override { return AlgoTier::<REALTIME|PERIODIC|ON_DEMAND|OFF_DEVICE>; }
     uint16_t ramUsage() const override { return sizeof(*this); }
 
 private:
-    // State machine
     AlgoState state_ = AlgoState::IDLE;
 
-    // Ring buffers (sized from spec)
+    // Ring buffers — sized from spec
     RingBuffer<float, BUFFER_SIZE> buffer_;
 
-    // Algorithm-specific state
+    // Algorithm-specific state (filter states, counters, accumulators)
     // ...
 
     // Output cache
     AlgorithmOutput output_ = {0, 0, 0, false};
 
-    // Signal quality
+    // Internal methods
     float computeSQI() const;
 };
 ```
 
-### Step 2: Generate `firmware.cpp`
+### Step 5: Generate `Algo_<ID>.cpp` (firmware implementation)
 
-Structure every implementation file identically:
+Structure every file identically:
 
 ```cpp
 #include "Algo_<ID>.h"
@@ -488,312 +945,579 @@ Structure every implementation file identically:
 // <ID>: <Name>
 // <One-line description>
 //
-// Classification: <Wellness | Health Indicator | Health Screening>
+// Category: <health-biometric | sport-motion | hybrid>
+// Classification: <Wellness | Health Indicator | Health Screening | Sport Performance>
 // Tier: <0-3>
-// Dependencies: <list or "none">
+// Consumes: <CH_PPG, CH_ACCEL, ...>
+// Consumed by: <A02, X01, ... or "none">
 // Citation: <primary reference>
 // ═══════════════════════════════════════════════════════
 
-// ─── Constants ─────────────────────────────────────────
-// All thresholds and parameters here, NEVER magic numbers in code
+// ─── Constants (NO magic numbers in algorithm code) ────
 namespace {
-    constexpr float PARAM_NAME = value;  // What it means, citation
+    constexpr float PARAM_NAME = value;  // Meaning, citation
+    // ... all parameters from spec
 }
 
 // ─── Init ──────────────────────────────────────────────
 void Algo_<ID>::init() {
     buffer_.clear();
     state_ = AlgoState::ACQUIRING;
-    // ... reset all state
+    output_ = {0, 0, 0, false};
+    // Reset all internal state
 }
 
-// ─── Update (called by scheduler) ──────────────────────
+// ─── Update ────────────────────────────────────────────
 void Algo_<ID>::update(uint32_t now_ms) {
-    // 1. Read input (from sensor driver or dependency output)
-    // 2. Check SQI — if too low, set state LOW_QUALITY, return
-    // 3. Push to ring buffer
-    // 4. If not enough data yet, stay ACQUIRING, return
-    // 5. Run algorithm
-    // 6. Clamp output to physiological range
-    // 7. Update output struct with value + SQI + timestamp
-    // 8. Set state = VALID
+    // 1. Read input from sensor driver or dependency
+    // 2. Check SQI — if below threshold, set LOW_QUALITY, return
+    // 3. Push to ring buffer with timestamp
+    // 4. If not enough data, stay ACQUIRING, return
+    // 5. Run algorithm core
+    // 6. Clamp output to valid range
+    // 7. Update output_ with value + SQI + timestamp + valid
+    // 8. Set state_ = AlgoState::VALID
 }
 
-// ─── SQI Computation ───────────────────────────────────
+// ─── SQI ───────────────────────────────────────────────
 float Algo_<ID>::computeSQI() const {
-    // Signal-specific quality assessment
-    // Returns 0.0 (garbage) to 1.0 (perfect)
+    // Signal-specific quality assessment (0.0–1.0)
+    // See spec SQI section for computation details
 }
 
-// ─── Output ────────────────────────────────────────────
-AlgorithmOutput Algo_<ID>::getOutput() const {
-    return output_;
-}
-
-AlgoState Algo_<ID>::getState() const {
-    return state_;
-}
+// ─── Getters ───────────────────────────────────────────
+AlgorithmOutput Algo_<ID>::getOutput() const { return output_; }
+AlgoState Algo_<ID>::getState() const { return state_; }
 ```
 
-### Step 3: Implement Signal Simulation (Test Vectors)
+### Step 6: Generate `test_vectors.h`
 
-Instead of hardcoded arrays of floats, testing MUST use a signal simulation approach for generating test scenarios. Use mathematical models to construct physiological waveforms on the fly.
-
-For example, a test scenario requires generating a PPG wave with configurable:
-- Heart rate (40–200 BPM)
-- Amplitude (perfusion index)
-- Noise level (SNR)
-- Motion artifact intensity (0.0–1.0g)
-
-(Reference: NeuroKit2 biological signal simulators `nk.ppg_simulate()`, `nk.ecg_simulate()`, `nk.eda_simulate()`).
+Signal simulation approach — NOT hardcoded arrays. Use mathematical models:
 
 ```cpp
-// Simulated test scenarios for <ID>: <Name>
-struct TestScenario {
-    float heart_rate;
-    float snr_db;
-    float motion_g;
+#pragma once
+// Test scenarios for <ID>: <Name>
+// Compile: clang++ -std=c++17 -I../../framework -o test_<id> ../../test/test_runner.cpp
+// (add algorithm source files to compilation)
+
+struct TestScenario_<ID> {
+    const char* description;
+    float param1;       // Algorithm-specific test parameter
+    float param2;       // ...
     float expectedOutput;
     float tolerance;
-    const char* description;
+    bool  expectValid;  // false = algorithm should suppress output
 };
 
-static const TestScenario TEST_SCENARIOS_<ID>[] = {
-    { 72.0f,  20.0f, 0.0f, 72.0f, ±2.0f, "Clean 72 BPM, high SNR" },
-    { 40.0f,  20.0f, 0.0f, 40.0f, ±2.0f, "Bradycardia 40 BPM" },
-    { 180.0f, 10.0f, 0.0f, 180.0f,±3.0f, "Tachycardia 180 BPM, low SNR" },
-    { 72.0f,   0.0f, 1.5f, 0.0f,   0.0f, "Heavy motion artifact — expect suppress" },
+static const TestScenario_<ID> SCENARIOS_<ID>[] = {
+    // Must cover: normal, boundary-low, boundary-high, no-signal, artifact
+    { "Clean normal condition",    ..., ..., expected, ±tol, true  },
+    { "Boundary low",              ..., ..., expected, ±tol, true  },
+    { "Boundary high",             ..., ..., expected, ±tol, true  },
+    { "No signal / sensor off",    ..., ..., 0.0f,    0.0f, false },
+    { "Heavy artifact / noise",    ..., ..., 0.0f,    0.0f, false },
+    { "Gradual transition",        ..., ..., expected, ±tol, true  },
+    { "Edge: low quality signal",  ..., ..., expected, ±tol, true  },
 };
+
+static constexpr int SCENARIO_COUNT_<ID> = sizeof(SCENARIOS_<ID>) / sizeof(SCENARIOS_<ID>[0]);
 ```
 
-### Step 4: Verify Against Checklist
+**Step 6b: Generate `test_scenarios.js` (Tier 3 only)**
 
-Before marking the algorithm complete, verify:
+Tier 3 algorithms run in the browser via `algo_<id>.js`. C++ test vectors are meaningless for them. Generate a JavaScript test file instead:
 
-- [ ] Every formula has a citation comment
-- [ ] Output is clamped to physiological range (see §2.2)
-- [ ] SQI is computed and gates output (see §2.3)
-- [ ] State machine handles: IDLE → ACQUIRING → VALID → LOW_QUALITY
-- [ ] No dynamic memory allocation
-- [ ] No blocking calls (no delay(), no while-wait)
-- [ ] Motion rejection used if PPG/ECG-based (see §4.6)
-- [ ] Buffer sizes match spec window requirements
-- [ ] Total RAM < tier budget
-- [ ] Disclaimer flag set for Health Screening classification
-- [ ] No PII in any output struct
-- [ ] Edge cases from spec handled explicitly
-- [ ] Test scenarios simulate: normal, boundary, no-signal, artifact
+```javascript
+// test_scenarios.js — Test scenarios for <ID>: <Name>
+// Run: node test_scenarios.js (or import in browser test harness)
+
+import { compute } from './algo_<id>.js';
+
+const scenarios = [
+  {
+    description: "Clean normal condition",
+    input: { /* algorithm-specific mock data */ },
+    expected: { primary: 75.0, valid: true },
+    tolerance: 2.0,
+  },
+  {
+    description: "Insufficient data (day 1)",
+    input: { /* sparse data */ },
+    expected: { primary: null, valid: false },
+    tolerance: 0,
+  },
+  {
+    description: "Boundary high",
+    input: { /* extreme but valid data */ },
+    expected: { primary: 95.0, valid: true },
+    tolerance: 3.0,
+  },
+  // Must cover: normal, insufficient data, boundary-low, boundary-high,
+  // missing sub-algorithm data, gradual trend change
+];
+
+scenarios.forEach(s => {
+  const result = compute(s.input);
+  const pass = s.expected.valid
+    ? Math.abs(result.value - s.expected.primary) <= s.tolerance
+    : result.value === null;
+  console.log(`${pass ? 'PASS' : 'FAIL'}: ${s.description}`);
+});
+```
+
+**Rule:** If the algorithm is Tier 3, generate `test_scenarios.js` instead of `test_vectors.h`. If the algorithm has both firmware (Tier 0–2) and companion (Tier 3) components, generate both.
+
+### Step 7: Generate `display.js` (dashboard render module)
+
+See §12 for display module specification.
+
+### Step 8: Generate `algo_<id>.js` (Tier 3 only)
+
+For off-device algorithms that run in the browser. See §14 for template.
+
+### Step 9: Update registry
+
+Add the algorithm to `.agents/skills/openpulse_algorithm/resources/algorithm_registry.md`.
+
+### Step 10: Verify against checklist
+
+Run the review checklist from §16 mentally. If any check fails, fix it before reporting to user.
 
 ---
 
-## 7. DASHBOARD-SIDE ALGORITHMS (Tier 3)
+## 12. DISPLAY MODULE GENERATION
 
-Composite algorithms (C01–C10) and long-baseline algorithms (trends, biological age) run in the **browser dashboard**, not on the MCU.
+Each algorithm ships a `display.js` file that declares how it should render on the dashboard.
 
-### 7.1 Data Flow
+### 12.1 Display Module Structure
+
+```javascript
+// display.js for <ID>: <Name>
+// Dashboard render module — declares layout, formatting, and visualization
+export default {
+  id: '<ID>',
+  name: '<Human Name>',
+  version: 1,
+
+  // ─── Layout Type ──────────────────────────────────
+  // Determines the dashboard panel structure
+  layout: '<type>',  // see §12.2
+
+  // ─── Primary Display ──────────────────────────────
+  primary: {
+    type: 'number',      // 'number' | 'waveform' | 'gauge' | 'status' | 'bar'
+    label: '<Label>',
+    unit: '<unit>',
+    decimals: 0,
+    range: [min, max],
+    // Optional: color zones for gauge/number
+    zones: [
+      { min: 0, max: 30, color: '#ef4444', label: 'Low' },
+      { min: 30, max: 60, color: '#f59e0b', label: 'Moderate' },
+      { min: 60, max: 100, color: '#22c55e', label: 'Good' },
+    ],
+  },
+
+  // ─── Secondary Displays ───────────────────────────
+  // Additional info shown alongside primary (SQI, sub-metrics, etc.)
+  secondary: [
+    { type: 'sqi-bar', label: 'Signal Quality' },
+    // { type: 'number', key: 'rmssd', label: 'RMSSD', unit: 'ms', decimals: 1 },
+    // { type: 'status', key: 'state', label: 'State' },
+  ],
+
+  // ─── Chart Configuration ──────────────────────────
+  chart: {
+    type: 'line',         // 'line' | 'bar' | 'scatter' | 'segments' | 'none'
+    windowSeconds: 60,    // How much history to show
+    yRange: [min, max],   // Y-axis range (matches output valid range)
+  },
+
+  // ─── Card Size ────────────────────────────────────
+  size: '1x1',  // '1x1' | '2x1' | '2x2' | '1x2'
+
+  // ─── Classification Badge ─────────────────────────
+  classification: '<wellness|health-indicator|health-screening|sport-performance>',
+
+  // ─── Channels Required ────────────────────────────
+  channels: ['ppg', 'accel'],  // For the dashboard to check sensor availability
+
+  // ─── Tier ─────────────────────────────────────────
+  tier: 0,  // 0-3
+
+  // ─── Parameters (tunable in dev dashboard) ────────
+  params: [
+    { name: 'Param Name', min: 0, max: 10, default: 5, step: 0.1, unit: 'Hz' },
+  ],
+};
+```
+
+### 12.2 Layout Type Selection
+
+The layout type is determined by the algorithm category and output type:
+
+| Algorithm Produces | Layout Type | Description |
+|---|---|---|
+| Single real-time vital sign (HR, SpO2, temp, EDA) | `gauge` | Big number + arc gauge with color zones + line chart |
+| Waveform analysis (ECG shape, PPG morphology) | `waveform` | Real-time scrolling waveform + feature annotations |
+| Score (0–100) (recovery, sleep, strain) | `score` | Circular gauge with gradient + score breakdown |
+| Cumulative counter (steps, calories, reps) | `counter` | Big number + daily bar chart + goal indicator |
+| Multi-metric sport technique | `multi-metric` | Multiple sub-scores in grid + event timeline |
+| Time-series / trend (temp baseline, EDA timeline) | `timeline` | Time-series chart with baseline band + deviation markers |
+| Sleep phases | `phases` | Segmented horizontal bar (Wake/Light/Deep/REM) + summary |
+| Event detection (snoring, workout, arrhythmia) | `event-log` | Event list with timestamps + summary statistics |
+| Boolean / state (sleep detected, workout active) | `status` | Status badge (Active/Inactive) + duration timer |
+
+### 12.3 Automatic Layout Assignment
+
+When generating `display.js`, select the layout type based on this cascade:
+
+1. If spec `Output.Unit` is BPM, %, °C, mmHg, µS → `gauge`
+2. If spec `Output.Unit` is `score` and range is [0, 100] → `score`
+3. If spec `Output.Unit` is `steps`, `kcal`, `reps` → `counter`
+4. If spec `Output.Unit` is empty and range is [0, 1] (boolean) → `status`
+5. If spec mentions "waveform" or "morphology" → `waveform`
+6. If spec mentions "phases" or "stages" → `phases`
+7. If spec mentions "events" or "detection" and output is episodic → `event-log`
+8. If category is `sport-motion` and has multiple sub-outputs → `multi-metric`
+9. If spec tier is 3 and metric is trended → `timeline`
+10. Default → `gauge`
+
+### 12.4 Multi-Metric and Score Breakdown Layouts
+
+**For algorithms with multiple output metrics** (sport technique, composite scores), extend the display module:
+
+```javascript
+// Multi-metric layout — for algorithms producing 2+ values
+metrics: [
+  { key: "cadence",   label: "Cadence",       unit: "spm", range: [120, 200] },
+  { key: "gct",       label: "Ground Contact", unit: "ms",  range: [180, 300] },
+  { key: "vertOsc",   label: "Vert. Osc.",    unit: "cm",  range: [5, 15] },
+],
+primary: "cadence",   // Which metric drives the main display number
+```
+
+**For composite scores** (recovery, sleep score, biological age), declare the score breakdown:
+
+```javascript
+// Score breakdown — for composite algorithms producing a weighted score
+breakdown: [
+  { key: "hrv",    label: "HRV",           weight: 0.30 },
+  { key: "sleep",  label: "Sleep Quality",  weight: 0.25 },
+  { key: "rhr",    label: "Resting HR",     weight: 0.25 },
+  { key: "strain", label: "Prior Strain",   weight: 0.20 },
+],
+```
+
+The dashboard renders breakdowns as a stacked bar or radar chart. Each sub-metric maps to a sub-algorithm's output.
+
+**Rule:** If the algorithm has more than one output metric, use `metrics[]` array. If it's a composite score, also include `breakdown[]`. The `primary` field selects which metric is shown as the headline number.
+
+---
+
+## 13. SPEC TEMPLATE
+
+Use this template for every algorithm spec. Save at `algorithms/<ID>_<name>/spec.md`.
+
+Reference example: `.agents/skills/openpulse_algorithm/examples/A01_heart_rate_spec.md`.
+
+All fields are **MANDATORY** unless marked (optional). No blanks. No TODOs.
+
+````markdown
+# <ID>: <Algorithm Name>
+
+## Classification
+- **Category**: health-biometric | sport-motion | hybrid
+- **Layer**: Base | Cross-Sensor | Composite
+- **Tier**: 0 (realtime) | 1 (periodic) | 2 (on-demand) | 3 (off-device)
+- **Regulatory**: Wellness | Health Indicator | Health Screening | Sport Performance
+- **Priority**: P0 (MVP) | P1 (v1.0) | P2 (v2.0)
+- **Consumes**: CH_PPG, CH_ACCEL, ... (list ALL channels read)
+- **Outputs**: <type> <name> (<unit>)
+- **Consumed by**: [A02, X01, ...] | [none]
+
+## Hardware
+- **Required Pucks**: Puck 1 + XIAO | Puck 1 + Puck 2 + XIAO | All
+- **Channels Used**:
+  | Channel | Puck | Chip | Sample Rate | Purpose in This Algorithm |
+  |---------|------|------|-------------|---------------------------|
+  | CH_PPG  | Puck 1 | MAX86150 | 100 Hz | Primary signal source |
+  | CH_ACCEL | XIAO | LSM6DS3 | 50 Hz | Motion artifact rejection |
+
+## Algorithm
+
+### Method
+1. **Preprocessing**: <filters, DC removal, normalization>
+2. **Feature Extraction**: <peaks, intervals, amplitudes, frequency features>
+3. **Computation**: <the formula / model — with inline citation>
+4. **Post-Processing**: <averaging, outlier rejection, smoothing>
+5. **Output Gating**: <minimum data, no-signal behavior>
+
+### Alternative Methods
+- **Method A**: <Name> (<Citation>). <Trade-off>.
+- **Method B**: <Name> (<Citation>). <Trade-off>.
+
+### Parameters
+| Parameter | Value | Unit | Source |
+|-----------|-------|------|--------|
+| <name> | <value> | <unit> | <citation or rationale> |
+
+### SQI Computation
+<How signal quality is assessed for this specific algorithm.>
+- **SQI Threshold**: <0.0–1.0>
+
+### Power & Resources
+- **Power Mode**: continuous | duty-cycled | on-demand
+- **Expected Current Draw**: <mA active> / <mA idle>
+- **RAM Budget**: <bytes> (must be within tier budget)
+
+## Validation
+- **Validation Dataset**: <PhysioNet DB | sport dataset | custom>
+- **Accuracy Target**: <metric> ± <tolerance> vs. <reference>
+
+## Output
+- **Type**: AlgorithmOutput | CalibratedOutput
+- **Unit**: <BPM, %, °C, mmHg, µS, steps, score, ...>
+- **Valid Range**: <min>–<max>
+- **Update Rate**: <how often a new value is produced>
+- **BLE Characteristic**: UUID `12345678-1234-5678-1234-56789abcdef<X>`
+- **Zero/null means**: <what 0 or "--" indicates>
+
+## Display
+- **Layout**: <gauge | waveform | score | counter | multi-metric | timeline | phases | event-log | status>
+- **Primary**: <type>, <label>, <unit>, <decimals>, <range>
+- **Zones** (optional): [{ min, max, color, label }, ...]
+- **Secondary**: [SQI bar, sub-metrics, state badge, ...]
+- **Chart**: <line|bar|scatter|segments|none>, <window seconds>
+- **Card Size**: <1x1 | 2x1 | 2x2 | 1x2>
+
+## Edge Cases
+| Condition | Behavior |
+|-----------|----------|
+| No signal / sensor off | |
+| Motion artifact | |
+| Sensor saturation (ADC clipped) | |
+| < minimum data collected | |
+| Out-of-range result | |
+| Dependency unavailable | |
+
+## References
+1. <Author>, "<Title>", <Journal>, <Year>. DOI: <doi>
+2. <Manufacturer>, "<App Note Title>", <Year>.
+
+## Test Scenarios (Simulation)
+| # | Scenario | Expected Output | Tolerance |
+|---|----------|-----------------|-----------|
+| 1 | Normal clean signal | <value> | ±<tol> |
+| 2 | Boundary low | <value> | ±<tol> |
+| 3 | Boundary high | <value> | ±<tol> |
+| 4 | No signal | 0 or NaN | exact |
+| 5 | Heavy artifact / noise | hold / suppress | — |
+| 6 | Gradual transition | tracks true | ±<tol> |
+| 7 | Low quality signal | detects if above threshold | ±<tol> |
+````
+
+### 13.1 Sport-Specific Sections (add when category = sport-motion)
+
+Insert after `## Algorithm`:
+
+````markdown
+## Biomechanical Model
+- **Movement Type**: <swing | stride | rep | posture | gesture>
+- **Body Segment**: <arm | leg | torso | wrist | full-body>
+- **Sensor Placement**: <wrist-worn — describe orientation expectations>
+- **Key Kinematic Features**:
+  | Feature | Axis | Description | Expected Range |
+  |---------|------|-------------|----------------|
+  | Peak angular velocity | Gyro Z | Wrist rotation during swing | 200–1500 °/s |
+  | Impact acceleration | Accel magnitude | Ball contact shock | 3–15 g |
+
+## Movement Features
+- **Detection Method**: <threshold-based | template-matching | state-machine | ML classifier>
+- **Window Size**: <samples> (<duration at sample rate>)
+- **Segmentation**: <how individual movements are isolated from continuous stream>
+- **Quality Metric**: <movement quality score computation — e.g., consistency, symmetry>
+````
+
+---
+
+## 14. DASHBOARD-SIDE ALGORITHMS (Tier 3)
+
+Composite and trend algorithms run in the **browser**, not on the MCU.
+
+### 14.1 Data Flow
 
 ```
 nRF52840 (firmware)                    Browser (dashboard)
 ─────────────────                      ────────────────────
 Tier 0-2 algorithms                    Receives BLE values
     │                                       │
-    ├── HR, SpO2, PTT ──── BLE ────►──── Store in IndexedDB
-    ├── EDA, Temp    ──── BLE ────►──── time-series history
-    ├── IMU, Mic     ──── BLE ────►──── 14+ day rolling window
+    ├── HR, SpO2, PTT ──── BLE ────►  Store in IndexedDB
+    ├── EDA, Temp    ──── BLE ────►  time-series history
+    ├── IMU, Mic     ──── BLE ────►  14+ day rolling window
     │                                       │
     │                                  Tier 3 algorithms
-    │                                       │
     │                                  ├── Recovery Score (C01)
     │                                  ├── Sleep Score (C03)
     │                                  ├── Biological Age (C04)
     │                                  └── PDF Report (C08)
 ```
 
-### 7.2 Dashboard Algorithm Rules
+### 14.2 Dashboard Algorithm Template
 
-- Store time-series in **IndexedDB** (not localStorage — too small)
-- Baselines require **14 days minimum** before reporting scores
-- Show "Collecting data (Day 3 of 14)" during baseline period
-- All score algorithms use the **same 0–100 scale** with consistent semantics:
-  - 0–29: Poor
-  - 30–49: Below Average
-  - 50–69: Average
-  - 70–89: Good
-  - 90–100: Excellent
-- Composite scores use **weighted averages** with weights defined in the spec
-- Every composite shows which sub-scores contributed and their individual values
-
-### 7.3 Trend Analysis
-
-For all trended metrics (resting HR, HRV, temperature baseline):
+For Tier 3 algorithms, generate `dev/dashboard/algorithms/algo_<id>.js`:
 
 ```javascript
-// 7-day trend: simple linear regression
-// 30-day trend: exponential moving average
-// 90-day trend: rolling median with outlier rejection (IQR method)
+// algo_<id>.js — <Name>
+// Tier 3: Off-device algorithm (runs in browser)
+// Consumes: <list of BLE channels or other algorithm outputs>
 
-function computeTrend(data, windowDays) {
-    // Remove outliers: values outside 1.5×IQR
-    // Compute slope via least-squares regression
-    // Return: { direction: 'improving'|'stable'|'declining', magnitude: float }
-}
+export default {
+  id: '<ID>',
+  name: '<Name>',
+
+  // Required data channels (from IndexedDB time-series)
+  requires: ['hr', 'hrv', 'skinTemp', ...],
+
+  // Minimum data before first output
+  minimumDays: 1,        // or 14 for baseline-dependent
+
+  // Computation
+  compute(data, userProfile) {
+    // data = { hr: [...], hrv: [...], ... } — time-series from IndexedDB
+    // userProfile = { age, weight, height, ... } — from localStorage
+    //
+    // Returns: { value, sqi, valid, breakdown: {...} }
+
+    // 1. Validate data sufficiency
+    // 2. Compute sub-scores
+    // 3. Weighted combination
+    // 4. Range-check output
+
+    return {
+      value: 0,
+      sqi: 0,
+      valid: false,
+      timestamp: Date.now(),
+      breakdown: {},  // Sub-score details for display
+    };
+  },
+};
+```
+
+### 14.3 Dashboard Algorithm Rules
+
+- Store time-series in **IndexedDB** (not localStorage)
+- Baselines require **14 days minimum**; show "Collecting data (Day N of 14)"
+- Score algorithms use **0–100 scale**: 0–29 Poor, 30–49 Below Average, 50–69 Average, 70–89 Good, 90–100 Excellent
+- Composite scores show which sub-scores contributed
+- Trend analysis: 7-day linear regression, 30-day EMA, 90-day rolling median with IQR outlier rejection
+
+---
+
+## 15. NAMING CONVENTIONS
+
+```
+── Directories ──
+algorithms/A01_heart_rate/          Core base algorithm
+algorithms/X06_stress_vs_exercise/  Core cross-sensor fusion
+algorithms/C01_recovery_score/      Core composite score
+algorithms/U01_tennis_forehand/     User-created algorithm
+
+── Firmware Files ──
+firmware/src/algorithms/base/Algo_A01.h       Base algorithm header
+firmware/src/algorithms/base/Algo_A01.cpp     Base algorithm implementation
+firmware/src/algorithms/fusion/Algo_X06.h     Fusion algorithm header
+firmware/src/algorithms/fusion/Algo_X06.cpp   Fusion algorithm implementation
+firmware/src/algorithms/base/Algo_U01.h       User algorithm (base → base/)
+firmware/src/algorithms/fusion/Algo_U01.h     User algorithm (fusion → fusion/)
+
+── Dashboard Files ──
+dev/dashboard/algorithms/algo_u01.js          Tier 3 browser-side computation
+
+── Display Module ──
+algorithms/U01_tennis_forehand/display.js     Dashboard render module
+
+── Test Vectors ──
+algorithms/U01_tennis_forehand/test_vectors.h C++ test scenarios
+
+── Classes & Constants ──
+Class:      Algo_A01, Algo_U01
+Constants:  A01_FILTER_CUTOFF_HZ, U01_PEAK_THRESHOLD_G
+Buffers:    ppg_buffer_, accel_buffer_, gyro_buffer_
 ```
 
 ---
 
-## 8. ALGORITHM SPEC TEMPLATE
+## 16. REVIEW CHECKLIST
 
-When creating a new algorithm, use this template for the spec file. Save it at `algorithms/<ID>_<snake_case_name>/spec.md`.
-
-A complete example spec is available at `.agents/skills/openpulse_algorithm/examples/A01_heart_rate_spec.md`.
-
-```markdown
-# <ID>: <Algorithm Name>
-
-## Classification
-- **Layer**: Base | Cross-Sensor | Composite
-- **Tier**: 0 (realtime) | 1 (periodic) | 2 (on-demand) | 3 (off-device)
-- **Regulatory**: Wellness | Health Indicator | Health Screening
-- **Puck**: 1 | 2 | 3 | XIAO | Dashboard
-- **Priority**: P0 (MVP) | P1 (v1.0) | P2 (v2.0)
-- **Dependencies**: [none] | [A01, A02, ...]
-
-## Channel Input
-- **Channel**: <CH_PPG, CH_ECG, CH_SKIN_TEMP, etc.>
-- **Sample Rate**: <Hz>
-- **Bit Depth**: <bits>
-- **Buffer Size**: <samples> (<duration at sample rate>)
-
-## Output
-- **Type**: float32 | CalibratedOutput | AlgorithmOutput
-- **Unit**: <BPM, %, °C, mmHg, ...>
-- **Valid Range**: <min>–<max>
-- **Update Rate**: <how often a new value is produced>
-- **BLE Characteristic**: UUID 12345678-1234-5678-1234-56789abcdef<X>
-
-## Algorithm
-### Method
-<Describe the algorithm step by step. Be specific about:>
-1. Preprocessing (filters, DC removal)
-2. Feature extraction (peaks, intervals, amplitudes)
-3. Computation (the actual formula)
-4. Post-processing (averaging, outlier rejection)
-5. Output gating (minimum data requirement)
-
-### Alternative Methods
-- **Method A**: <Name, Reference, Tradeoff>
-- **Method B**: <Name, Reference, Tradeoff>
-
-### Parameters
-| Parameter | Value | Unit | Source |
-|-----------|-------|------|--------|
-| <name> | <value> | <unit> | <citation> |
-
-### SQI Computation
-<How signal quality is assessed for this specific algorithm. Incorporate IMU motion-level.>
-- **SQI Threshold**: <0.0–1.0> (Minimum quality required to emit output)
-
-### Power & Resources
-- **Power Mode**: continuous | duty-cycled | on-demand
-- **Expected Current Draw**: <mA active> / <mA idle>
-
-## Validation
-- **Validation Dataset**: <PhysioNet DB Name | Custom>
-- **Accuracy Target**: <Metric> ± <Tolerance> vs. <Reference>
-
-## Output
-- **Type**: float32 | CalibratedOutput | AlgorithmOutput
-- **Unit**: <BPM, %, °C, mmHg, ...>
-- **Valid Range**: <min>–<max>
-- **Update Rate**: <how often a new value is produced>
-- **BLE Characteristic**: UUID 12345678-1234-5678-1234-56789abcdef<X>
-
-## Edge Cases
-| Condition | Behavior |
-|-----------|----------|
-| No signal | <what happens> |
-| Motion artifact | <what happens> |
-| Sensor saturation | <what happens> |
-| < minimum data | <what happens> |
-| Out of range result | <what happens> |
-
-## Medical References
-1. <Author>, "<Title>", <Journal>, <Year>. DOI: <doi>
-2. ...
-
-## Test Scenarios (Simulation)
-| # | Scenario | Expected Output | Tolerance |
-|---|----------|-----------------|-----------|
-| 1 | <Clean 72 BPM, SNR 20dB> | <value> | ±<tol> |
-| 2 | <Bradycardia> | <value> | ±<tol> |
-| 3 | <Heavy Motion Artifact> | <value> | — |
-```
-
----
-
-## 9. NAMING CONVENTIONS
+Run this checklist mentally after generating every algorithm, before reporting to user. If ANY check fails, fix it.
 
 ```
-Files:          Algo_A01.h, Algo_A01.cpp, Algo_X06.h, Algo_X06.cpp
-Classes:        Algo_A01, Algo_X06, Algo_C01
-Constants:      A01_FILTER_CUTOFF_HZ, X06_EDA_THRESHOLD_US
-Buffers:        a01_ppg_buffer_, x06_eda_buffer_
-BLE UUIDs:      Sequential from ...def1 (A01) through ...deXX
-Spec files:     algorithms/A01_heart_rate/spec.md
-Test vectors:   algorithms/A01_heart_rate/test_vectors.h
-```
+CATEGORY-INDEPENDENT (always check)
+  □ Spec has every mandatory field filled — no blanks, no TODOs
+  □ Output is range-checked (physiological clamp OR sensible range)
+  □ SQI computed and gates output
+  □ State machine: IDLE → ACQUIRING → VALID → LOW_QUALITY all handled
+  □ No malloc/new in loop, no delay(), no double, no String
+  □ Total RAM within tier budget
+  □ Non-blocking (< budget per update call)
+  □ Test scenarios: normal, boundary-low, boundary-high, no-signal, artifact
+  □ display.js layout matches algorithm output type
+  □ Channels match between spec, .h, .cpp, and display.js
+  □ No PII in BLE payloads or output structs
+  □ All processing on-device or in-browser
 
----
-
-## 10. REVIEW CHECKLIST (Run Before Every PR)
-
-```
-MEDICAL CORRECTNESS
-  □ Every formula has a citation
-  □ Output clamped to physiological range
-  □ Algorithm defines specific SQI threshold (replaces global 0.4)
-  □ Confidence intervals reported where applicable
-  □ Calibration state tracked and displayed
+HEALTH-BIOMETRIC (when category = health-biometric or hybrid)
+  □ Every formula has a peer-reviewed citation
+  □ Output clamped to physiological range (§6.2)
+  □ SQI threshold is algorithm-specific (not a global default)
+  □ Confidence intervals if applicable (BP, SpO2, VO2max)
+  □ Calibration tracked if applicable
   □ Regulatory classification correct
-  □ Disclaimer present for Health Screening algorithms
-  □ Algorithm Dependency Graph edges explicitly defined
+  □ Disclaimer flag for Health Screening
+  □ Dependency graph edges defined (Consumes / Consumed by)
+  □ Validated against recommended dataset (§17)
 
-SIGNAL PROCESSING
+SIGNAL PROCESSING (when algorithm processes raw signals)
   □ Filters respect Nyquist
   □ Adaptive thresholds (no magic numbers)
-  □ Motion artifact rejection for PPG/ECG algorithms
+  □ Motion artifact rejection if PPG/ECG-based
   □ Timestamps used for cross-sensor alignment
-  □ Baseline uses median, not mean
+  □ Baseline uses median, not mean (for trend algorithms)
 
-FIRMWARE ENGINEERING
-  □ No malloc/new in loop
-  □ No delay() in algorithm code
-  □ No double (float only)
-  □ Total RAM within tier budget
-  □ State machine covers all AlgoState transitions
-  □ Non-blocking (< 1ms per update call)
-
-PRIVACY
-  □ No PII in BLE payloads
-  □ No network calls
-  □ All processing on-device or in-browser
-  □ Calibration data in localStorage only
-
-TESTING
-  □ Signal simulator used for scenario testing (replaces static vectors)
-  □ Covers: normal, boundary low, boundary high, no signal, heavy artifact
-  □ Validated against recommended PhysioNet DB
+SPORT-MOTION (when category = sport-motion or hybrid)
+  □ Movement features clearly defined
+  □ Biomechanical model documented
+  □ Sensor placement assumptions stated
+  □ Ground truth validation method defined
+  □ Accuracy target with tolerance specified
+  □ Range-check on outputs (sensible bounds)
+```
 
 ---
 
-## 11. VALIDATION DATASETS
+## 17. VALIDATION DATASETS
 
-When validating an algorithm offline or verifying accuracy, use the appropriate gold-standard open dataset:
+### Health Algorithms
 
-| Target Metric | Recommended PhysioNet Database | Accuracy Target |
-|---------------|--------------------------------|-----------------|
-| **Heart Rate** | MIT-BIH Arrhythmia Database | MAE < 2 BPM vs. ECG |
-| **HRV (RMSSD)** | MIT-BIH Normal Sinus Rhythm | Correlation $r \ge 0.95$ vs. ECG |
-| **SpO2** | MIMIC-III Waveform Database (ECG+PPG) | Bias < 2% vs. CO-Oximetry |
-| **Sleep Staging** | Sleep-EDF Database (Annotated PSG) | Cohen's $\kappa \ge 0.6$ (4-class) |
-| **PTT / BP** | MIMIC-III (Synchronous ECG+PPG+ABP) | RMSE < 5 mmHg (AAMI standard) |
+| Target Metric | Recommended Database | Accuracy Target |
+|---|---|---|
+| Heart Rate | MIT-BIH Arrhythmia Database | MAE < 2 BPM vs. ECG |
+| HRV (RMSSD) | MIT-BIH Normal Sinus Rhythm | Correlation r ≥ 0.95 vs. ECG |
+| SpO2 | MIMIC-III Waveform Database | Bias < 2% vs. CO-Oximetry |
+| Sleep Staging | Sleep-EDF Database | Cohen's κ ≥ 0.6 (4-class) |
+| PTT / BP | MIMIC-III (ECG+PPG+ABP) | RMSE < 5 mmHg (AAMI standard) |
+| ECG Rhythm | MIT-BIH Arrhythmia Database | Sensitivity > 95% for AF detection |
+| Respiratory Rate | Capnobase (PPG+capnography) | MAE < 2 breaths/min |
+
+### Sport / Motion Algorithms
+
+| Target Metric | Recommended Database | Accuracy Target |
+|---|---|---|
+| Activity Recognition | UCI HAR Dataset | F1 ≥ 0.90 (6-class) |
+| Step Counting | PAMAP2 Physical Activity | Count error < 5% over 100 steps |
+| Running Cadence | Custom (metronome-synchronized) | MAE < 3 SPM |
+| Sport Technique | Custom (video-annotated) | Detection F1 ≥ 0.85 |
+| Gait Analysis | WISDM Dataset | Stride length error < 10% |
+| Fall Detection | SisFall Dataset | Sensitivity > 95%, Specificity > 90% |

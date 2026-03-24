@@ -275,18 +275,37 @@ input { font: inherit; color: inherit; }
 
 .algo-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 3px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.15s ease;
-  margin-bottom: 1px;
+  margin-bottom: 2px;
+  border-left: 2px solid transparent;
 }
 .algo-item:hover { background: var(--surface-1); }
-.algo-item.active { background: var(--accent-glow); }
-.algo-item.unavailable { opacity: 0.4; }
+.algo-item.active { background: var(--accent-glow); border-left-color: var(--accent); }
 
+/* ── Availability states ─────────────── */
+.algo-item.available { border-left-color: var(--green); }
+.algo-item.available .algo-item-name { color: var(--text-1); }
+.algo-item.partial { opacity: 0.55; border-left-color: var(--orange); }
+.algo-item.partial .algo-item-name { color: var(--text-2); }
+.algo-item.unavailable {
+  opacity: 0.3;
+  cursor: not-allowed;
+  pointer-events: none;
+  filter: grayscale(0.6);
+}
+.algo-item.unavailable .algo-item-name { color: var(--text-3); }
+
+.algo-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
 .algo-item-id {
   font-size: 10px; font-weight: 600;
   font-family: var(--font-mono);
@@ -304,11 +323,42 @@ input { font: inherit; color: inherit; }
 .algo-item-tier.t2 { background: var(--cyan-dim); color: var(--cyan); }
 .algo-item-tier.t3 { background: var(--accent-glow); color: var(--accent); }
 
-.algo-avail-dot {
-  width: 5px; height: 5px; border-radius: 50%;
+/* ── Channel pills per algo ──────────── */
+.algo-ch-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
-.algo-avail-dot.available { background: var(--green); }
-.algo-avail-dot.missing { background: var(--text-3); }
+.ch-pill {
+  font-size: 8px; font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1px 5px; border-radius: 3px;
+  letter-spacing: 0.3px;
+}
+.ch-pill.ch-on { background: var(--green-dim); color: var(--green); }
+.ch-pill.ch-off { background: var(--surface-1); color: var(--text-3); }
+
+/* ── Active channels strip in sensor section ── */
+.active-channels-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 10px;
+}
+.strip-label {
+  font-size: 9px; font-weight: 600;
+  color: var(--text-3); text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.strip-ch {
+  font-size: 9px; font-weight: 600;
+  font-family: var(--font-mono);
+  padding: 1px 5px; border-radius: 3px;
+  background: var(--green-dim); color: var(--green);
+}
 
 /* ─── Workspace ─────────────────────────────────────────────── */
 .workspace {
@@ -615,6 +665,121 @@ input { font: inherit; color: inherit; }
 .algo-meta-tag.base { background: var(--cyan-dim); color: var(--cyan); }
 .algo-meta-tag.fusion { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
 .algo-meta-tag.composite { background: var(--accent-glow); color: var(--accent); }
+.algo-meta-tag.custom { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
+.algo-meta-tag.multi-metric { background: var(--cyan-dim); color: var(--cyan); }
+.algo-meta-tag.score { background: var(--orange-dim); color: var(--orange); }
+.algo-meta-tag.gauge { background: var(--green-dim); color: var(--green); }
+.algo-meta-tag.sport-performance { background: var(--cyan-dim); color: var(--cyan); }
+
+/* ─── Custom Algorithm Import ───────────────────────────────── */
+.algo-import-section {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+.btn-import-algo {
+  width: 100%;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 12px;
+  font-size: 11px; font-weight: 500;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-import-algo:hover {
+  background: var(--surface-1); color: var(--text-1);
+  border-color: var(--accent);
+}
+.btn-import-algo svg { width: 14px; height: 14px; }
+
+/* ─── Custom Algo Badge in Sidebar ──────────────────────────── */
+.algo-item.custom { border-left: 2px solid var(--purple); }
+.algo-item.custom.available { border-left-color: var(--green); }
+.algo-item.custom.unavailable { border-left-color: var(--purple); }
+.algo-item-custom-badge {
+  font-size: 8px; font-weight: 700;
+  padding: 1px 4px; border-radius: 2px;
+  background: rgba(168, 85, 247, 0.15); color: var(--purple);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ─── Custom Panel Badge ────────────────────────────────────── */
+.custom-algo-badge {
+  font-size: 8px; font-weight: 700;
+  padding: 2px 6px; border-radius: 3px;
+  background: rgba(168, 85, 247, 0.15); color: var(--purple);
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+}
+.custom-panel .panel-header { border-left: 3px solid var(--purple); }
+
+/* ─── Multi-Metric Grid ────────────────────────────────────── */
+.custom-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.metric-cell {
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  text-align: center;
+}
+.metric-value {
+  font-size: 22px; font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  line-height: 1.2;
+}
+.metric-label {
+  font-size: 10px; font-weight: 500;
+  color: var(--text-2);
+  margin-top: 2px;
+}
+.metric-unit {
+  font-size: 9px; color: var(--text-3);
+}
+
+/* ─── Score Breakdown Bars ──────────────────────────────────── */
+.custom-breakdown-section { margin-bottom: 10px; }
+.breakdown-bars {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.breakdown-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.breakdown-label {
+  font-size: 10px; color: var(--text-2);
+  min-width: 80px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.breakdown-track {
+  flex: 1; height: 6px;
+  background: var(--surface-1);
+  border-radius: 3px; overflow: hidden;
+}
+.breakdown-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.breakdown-weight {
+  font-size: 9px; color: var(--text-3);
+  font-family: var(--font-mono);
+  min-width: 28px; text-align: right;
+}
+.breakdown-value {
+  font-size: 11px; font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+  min-width: 24px; text-align: right;
+}
 
 /* ─── Console ───────────────────────────────────────────────── */
 .console-bar {

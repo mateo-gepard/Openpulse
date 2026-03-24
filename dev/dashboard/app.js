@@ -98,6 +98,14 @@ const ALGO_REGISTRY = [
   { id:'C10', name:'Personalized Insights',layer:'composite', tier:3, channels:['ppg','skinTemp','eda','accel','mic'], unit:'', range:[0,1], classification:'wellness', params:[] },
 ];
 
+// ─── Custom Algorithm Registry ──────────────────────────────
+// Loaded at runtime from display.js files (U-series algorithms)
+const CUSTOM_ALGOS = [];
+
+// Aliases for legacy naming (SENSOR_DEFS / SERVICE_UUID used in some places)
+const SENSOR_DEFS = CHANNEL_DEFS;
+const SERVICE_UUID = OP_SERVICE_UUID;
+
 // ─── State ───────────────────────────────────────────────────
 let bleDevice = null, bleServer = null, isConnected = false;
 let pollingHandle = null, currentTheme = 'dark';
@@ -152,6 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   renderAlgoList();
   renderSensorList();
+  initCustomAlgoImport();
   logConsole('info', 'SYS', 'DevWorkbench v6 ready. Click Connect to pair with board.');
   setInterval(updateUptime, 1000);
   setInterval(updateSensorOnlineStatus, 2000);
@@ -248,7 +257,23 @@ function renderSensorList() {
     container.appendChild(el);
   });
   $('#sensor-count').textContent = onlineCount;
-  $('#sb-sensors').textContent = onlineCount + ' sensor' + (onlineCount !== 1 ? 's' : '');
+  $('#sb-sensors').textContent = onlineCount + ' channel' + (onlineCount !== 1 ? 's' : '');
+
+  // Active channels summary strip
+  let strip = container.parentElement.querySelector('.active-channels-strip');
+  if (!strip) {
+    strip = document.createElement('div');
+    strip.className = 'active-channels-strip';
+    container.parentElement.appendChild(strip);
+  }
+  if (isConnected && onlineCount > 0) {
+    const online = getOnlineChannels();
+    strip.innerHTML = '<span class="strip-label">Active:</span> ' +
+      [...online].map(k => `<span class="strip-ch">${CH_LABELS[k] || k}</span>`).join('');
+    strip.style.display = '';
+  } else {
+    strip.style.display = 'none';
+  }
 }
 
 function updateSensorOnlineStatus() {
@@ -260,30 +285,106 @@ function updateSensorOnlineStatus() {
   if (isConnected) { renderSensorList(); renderAlgoList(); }
 }
 
+// ─── Channel helpers ─────────────────────────────────────────
+function getOnlineChannels() {
+  const online = new Set();
+  CHANNEL_DEFS.forEach(c => {
+    if (sensorData[c.key] && sensorData[c.key].online) online.add(c.key);
+  });
+  return online;
+}
+
+// Short labels for channel keys shown in the sidebar pills
+const CH_LABELS = {
+  ppg:'PPG', ecg:'ECG', skinTemp:'Temp', eda:'EDA', bioz:'BioZ',
+  envTemp:'Env', humidity:'Hum', pressure:'Pres', accel:'Acc', gyro:'Gyr', mic:'Mic'
+};
+
 // ─── Algorithm List Rendering ────────────────────────────────
+function getAllAlgos() {
+  return [...ALGO_REGISTRY, ...CUSTOM_ALGOS];
+}
+
 function renderAlgoList() {
   const container = $('#algo-list');
   container.innerHTML = '';
+  const onlineCh = getOnlineChannels();
   let count = 0;
-  ALGO_REGISTRY.forEach(algo => {
-    // Filter
+
+  // Build items with availability info so we can sort
+  const items = [];
+  getAllAlgos().forEach(algo => {
+    const channels = algo.sensors || algo.channels || [];
+    const isCustom = !!algo.custom;
+    // Layer / type filter
     if (activeAlgoFilter === 'base' && algo.layer !== 'base') return;
     if (activeAlgoFilter === 'fusion' && algo.layer !== 'fusion') return;
     if (activeAlgoFilter === 'composite' && algo.layer !== 'composite') return;
-    const sensorsAvailable = algo.sensors.every(sk => sensorData[sk] && sensorData[sk].online);
-    if (activeAlgoFilter === 'available' && !sensorsAvailable) return;
+    if (activeAlgoFilter === 'custom' && !isCustom) return;
+    // Per-channel availability
+    const chStatus = channels.map(ch => ({ key: ch, online: onlineCh.has(ch) }));
+    const metCount = chStatus.filter(c => c.online).length;
+    const allMet = channels.length > 0 && metCount === channels.length;
+    const noneMet = metCount === 0;
+    // "Available" filter — only show fully met
+    if (activeAlgoFilter === 'available' && (!allMet || !isConnected)) return;
+    // Search
     if (algoSearchText && !algo.name.toLowerCase().includes(algoSearchText) && !algo.id.toLowerCase().includes(algoSearchText)) return;
+    items.push({ algo, channels, isCustom, chStatus, metCount, allMet, noneMet });
+  });
+
+  // Sort: when connected, available-first, then partial, then unavailable
+  if (isConnected) {
+    items.sort((a, b) => {
+      if (a.allMet !== b.allMet) return a.allMet ? -1 : 1;
+      if (a.metCount !== b.metCount) return b.metCount - a.metCount;
+      return 0;
+    });
+  }
+
+  items.forEach(({ algo, channels, isCustom, chStatus, allMet, noneMet, metCount }) => {
     count++;
+    const panelKey = isCustom ? 'custom-' + algo.id : 'algo-' + algo.id;
+    const isActive = !!activePanels[panelKey];
+    // Availability class
+    let availClass = '';
+    if (isConnected && channels.length > 0) {
+      if (allMet) availClass = 'available';
+      else if (noneMet) availClass = 'unavailable';
+      else availClass = 'partial';
+    }
+
     const el = document.createElement('div');
-    el.className = 'algo-item' + (!sensorsAvailable && isConnected ? ' unavailable' : '') + (activePanels['algo-'+algo.id] ? ' active' : '');
+    el.className = ['algo-item', isCustom ? 'custom' : '', availClass, isActive ? 'active' : ''].filter(Boolean).join(' ');
+
+    // Build channel pills HTML
+    let chPillsHtml = '';
+    if (isConnected && channels.length > 0) {
+      chPillsHtml = '<div class="algo-ch-pills">' +
+        chStatus.map(c =>
+          `<span class="ch-pill ${c.online ? 'ch-on' : 'ch-off'}">${CH_LABELS[c.key] || c.key}</span>`
+        ).join('') + '</div>';
+    }
+
     el.innerHTML = `
-      <span class="algo-item-id">${algo.id}</span>
-      <span class="algo-item-name">${algo.name}</span>
-      <span class="algo-item-tier t${algo.tier}">T${algo.tier}</span>
-      <div class="algo-avail-dot ${sensorsAvailable || !isConnected ? '' : 'missing'}"></div>`;
-    el.addEventListener('click', () => toggleAlgoPanel(algo.id));
+      <div class="algo-item-top">
+        <span class="algo-item-id">${algo.id}</span>
+        <span class="algo-item-name">${algo.name}</span>
+        ${isCustom ? '<span class="algo-item-custom-badge">USR</span>' : ''}
+        <span class="algo-item-tier t${algo.tier}">T${algo.tier}</span>
+      </div>
+      ${chPillsHtml}`;
+
+    // Only allow click if not connected, or channels are fully met
+    if (!isConnected || allMet || channels.length === 0) {
+      el.addEventListener('click', () => {
+        if (isCustom) toggleCustomAlgoPanel(algo.id);
+        else toggleAlgoPanel(algo.id);
+      });
+    }
     container.appendChild(el);
   });
+
   $('#algo-filter-count').textContent = count;
 }
 
@@ -402,6 +503,7 @@ function onCharChanged(key, dataView) {
     if (panel) updateRawVec3Panel(panel, key, x, y, z);
     // Feed algo panels
     updateAlgoPanelsWithSensor(key);
+    updateCustomAlgoPanelsWithSensor(key);
     return;
   }
 
@@ -418,6 +520,7 @@ function onCharChanged(key, dataView) {
   if (panel) updateRawPanel(panel, key, val);
   // Feed algo panels
   updateAlgoPanelsWithSensor(key);
+  updateCustomAlgoPanelsWithSensor(key);
 }
 
 // ─── Panel Management ────────────────────────────────────────
@@ -476,7 +579,8 @@ function toggleAlgoPanel(algoId) {
 
   // Required sensors chips
   const inputsList = el.querySelector('.algo-inputs-list');
-  algo.sensors.forEach(sk => {
+  const algoChannels = algo.sensors || algo.channels || [];
+  algoChannels.forEach(sk => {
     const sdef = SENSOR_DEFS.find(s => s.key === sk);
     const isAvail = sensorData[sk] && sensorData[sk].online;
     const chip = document.createElement('span');
@@ -542,7 +646,7 @@ function toggleAlgoPanel(algoId) {
       // After a short delay, transition to VALID if sensors available
       setTimeout(() => {
         if (running && activePanels[pid]) {
-          const allAvail = algo.sensors.every(sk => sensorData[sk] && sensorData[sk].online);
+          const allAvail = algoChannels.every(sk => sensorData[sk] && sensorData[sk].online);
           badge.dataset.state = allAvail ? 'valid' : 'low_quality';
           badge.textContent = allAvail ? 'VALID' : 'LOW QUALITY';
         }
@@ -558,7 +662,7 @@ function toggleAlgoPanel(algoId) {
 
   el.querySelector('.btn-panel-close').addEventListener('click', () => removePanel(pid));
 
-  activePanels[pid] = { type: 'algo', algoId: algoId, element: el, algo, paramValues, running: false, history: [] };
+  activePanels[pid] = { type: 'algo', algoId: algoId, element: el, algo, paramValues, running: false, history: [], algoChannels };
   showPanel(el);
   renderSensorList();
   renderAlgoList();
@@ -599,7 +703,7 @@ function updateEmptyState() {
 function updateRunningCount() {
   let running = 0;
   Object.values(activePanels).forEach(p => {
-    if (p.type === 'algo') {
+    if (p.type === 'algo' || p.type === 'custom-algo') {
       const badge = p.element.querySelector('.algo-state-badge');
       if (badge && badge.dataset.state !== 'idle') running++;
     }
@@ -610,7 +714,7 @@ function updateRunningCount() {
 // ─── Raw Panel Updates ───────────────────────────────────────
 function updateRawPanel(panel, key, val) {
   const el = panel.element;
-  const sdef = panel.sdef;
+  const sdef = panel.cdef || panel.sdef;
   const display = el.querySelector('.raw-value');
   let text = '--';
   if (sdef.zeroMeansOff && val === 0) text = '--';
@@ -653,7 +757,8 @@ function updateRawVec3Panel(panel, key, x, y, z) {
 function updateAlgoPanelsWithSensor(sensorKey) {
   Object.values(activePanels).forEach(p => {
     if (p.type !== 'algo') return;
-    if (!p.algo.sensors.includes(sensorKey)) return;
+    const channels = p.algoChannels || p.algo.sensors || p.algo.channels || [];
+    if (!channels.includes(sensorKey)) return;
     const badge = p.element.querySelector('.algo-state-badge');
     if (!badge || badge.dataset.state === 'idle') return;
 
@@ -691,7 +796,7 @@ function updateAlgoPanelsWithSensor(sensorKey) {
     if (inputsList) {
       const chips = inputsList.querySelectorAll('.algo-input-chip');
       chips.forEach((chip, i) => {
-        const sk = p.algo.sensors[i];
+        const sk = channels[i];
         const isAvail = sensorData[sk] && sensorData[sk].online;
         chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
       });
@@ -846,4 +951,367 @@ function sensorIcon(key) {
     mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>',
   };
   return icons[key] || '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg>';
+}
+
+// ─── Custom Algorithm Import ─────────────────────────────────
+function initCustomAlgoImport() {
+  const btn = $('#btn-import-algo');
+  const input = $('#algo-file-input');
+  if (!btn || !input) return;
+
+  btn.addEventListener('click', () => input.click());
+  input.addEventListener('change', (e) => {
+    Array.from(e.target.files).forEach(file => loadCustomAlgoFile(file));
+    input.value = '';
+  });
+
+  // Load any previously saved custom algos from localStorage
+  try {
+    const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
+    saved.forEach(algoConfig => registerCustomAlgo(algoConfig, false));
+    if (saved.length > 0) {
+      renderAlgoList();
+      logConsole('info', 'SYS', `Restored ${saved.length} custom algorithm(s) from storage`);
+    }
+  } catch (_) {}
+}
+
+function loadCustomAlgoFile(file) {
+  if (!file.name.endsWith('.js')) {
+    logConsole('error', 'IMPORT', 'Only .js files accepted (expected display.js)');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const config = parseDisplayModule(e.target.result);
+      if (!config || !config.id || !config.name) {
+        logConsole('error', 'IMPORT', `Invalid display module: missing id or name in ${file.name}`);
+        return;
+      }
+      // Check for duplicates
+      if (getAllAlgos().find(a => a.id === config.id)) {
+        logConsole('warn', 'IMPORT', `Algorithm ${config.id} already exists — skipping`);
+        return;
+      }
+      registerCustomAlgo(config, true);
+      renderAlgoList();
+      logConsole('success', 'IMPORT', `Loaded custom algorithm: ${config.id} — ${config.name}`);
+    } catch (err) {
+      logConsole('error', 'IMPORT', `Failed to parse ${file.name}: ${err.message}`);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function parseDisplayModule(source) {
+  // Extract the default export object from display.js source text.
+  // Handles: export default { ... }  or  module.exports = { ... }
+  // Uses a safe approach: extract the object literal and parse as JSON5-like.
+  let objStr = '';
+
+  // Try "export default { ... }" pattern
+  const exportMatch = source.match(/export\s+default\s+(\{[\s\S]*\})\s*;?\s*$/);
+  if (exportMatch) {
+    objStr = exportMatch[1];
+  } else {
+    // Try "module.exports = { ... }" pattern
+    const moduleMatch = source.match(/module\.exports\s*=\s*(\{[\s\S]*\})\s*;?\s*$/);
+    if (moduleMatch) objStr = moduleMatch[1];
+  }
+
+  if (!objStr) throw new Error('No export default or module.exports found');
+
+  // Convert JS object literal to valid JSON:
+  // - Remove trailing commas
+  // - Quote unquoted keys
+  // - Remove single-line comments
+  // - Remove multi-line comments
+  let cleaned = objStr
+    .replace(/\/\/.*$/gm, '')          // remove single-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '')  // remove multi-line comments
+    .replace(/,\s*([}\]])/g, '$1')     // remove trailing commas
+    .replace(/(\{|,)\s*(\w+)\s*:/g, '$1"$2":')  // quote unquoted keys
+    .replace(/'/g, '"');               // single quotes to double
+
+  return JSON.parse(cleaned);
+}
+
+function registerCustomAlgo(config, persist) {
+  const algo = {
+    id: config.id,
+    name: config.name,
+    layer: config.layout === 'score' ? 'composite' : 'base',
+    tier: config.tier ?? 0,
+    channels: config.channels || [],
+    sensors: config.channels || [],
+    unit: config.primary?.unit || '',
+    range: config.primary?.range || [0, 100],
+    classification: config.classification || 'wellness',
+    params: (config.params || []).map(p => ({
+      n: p.name, min: p.min, max: p.max, default: p.default, step: p.step, unit: p.unit || ''
+    })),
+    custom: true,
+    layout: config.layout || 'gauge',
+    displayConfig: config,
+    metrics: config.metrics || null,
+    breakdown: config.breakdown || null,
+    primaryKey: config.primary?.key || (config.metrics && config.metrics[0]?.key) || null,
+    size: config.size || '1x1',
+  };
+
+  CUSTOM_ALGOS.push(algo);
+
+  if (persist) {
+    try {
+      const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
+      saved.push(config);
+      localStorage.setItem('openpulse-custom-algos', JSON.stringify(saved));
+    } catch (_) {}
+  }
+}
+
+// ─── Custom Algorithm Panel ──────────────────────────────────
+function toggleCustomAlgoPanel(algoId) {
+  const pid = 'custom-' + algoId;
+  if (activePanels[pid]) { removePanel(pid); return; }
+  const algo = CUSTOM_ALGOS.find(a => a.id === algoId);
+  if (!algo) return;
+
+  const tpl = $('#tpl-custom-algo-panel');
+  const clone = tpl.content.cloneNode(true);
+  const el = clone.querySelector('.panel');
+  el.dataset.panelId = pid;
+  el.querySelector('.panel-title').textContent = algo.id + ': ' + algo.name;
+  el.querySelector('.panel-subtitle').textContent = (algo.layout || 'gauge') + ' · tier ' + algo.tier;
+  el.querySelector('.algo-output-unit').textContent = algo.unit;
+
+  // Meta tags
+  const metaRow = el.querySelector('.algo-meta-row');
+  metaRow.innerHTML = `
+    <span class="algo-meta-tag custom">custom</span>
+    <span class="algo-meta-tag ${algo.layout}">${algo.layout}</span>
+    <span class="algo-meta-tag ${algo.classification}">${algo.classification.replace('-',' ')}</span>`;
+
+  // Required sensors
+  const sensors = algo.sensors || algo.channels || [];
+  const inputsList = el.querySelector('.algo-inputs-list');
+  sensors.forEach(sk => {
+    const sdef = SENSOR_DEFS.find(s => s.key === sk);
+    const isAvail = sensorData[sk] && sensorData[sk].online;
+    const chip = document.createElement('span');
+    chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
+    chip.innerHTML = `<span class="chip-dot"></span>${sdef ? sdef.name : sk}`;
+    inputsList.appendChild(chip);
+  });
+
+  // Multi-metric grid
+  if (algo.metrics && algo.metrics.length > 0) {
+    const grid = el.querySelector('.custom-metrics-grid');
+    grid.style.display = '';
+    algo.metrics.forEach(m => {
+      const cell = document.createElement('div');
+      cell.className = 'metric-cell';
+      cell.dataset.metricKey = m.key;
+      cell.innerHTML = `
+        <div class="metric-value" data-key="${m.key}">--</div>
+        <div class="metric-label">${m.label}</div>
+        <div class="metric-unit">${m.unit}</div>`;
+      grid.appendChild(cell);
+    });
+  }
+
+  // Score breakdown bars
+  if (algo.breakdown && algo.breakdown.length > 0) {
+    const section = el.querySelector('.custom-breakdown-section');
+    section.style.display = '';
+    const barsContainer = section.querySelector('.breakdown-bars');
+    algo.breakdown.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'breakdown-row';
+      row.innerHTML = `
+        <span class="breakdown-label">${b.label}</span>
+        <div class="breakdown-track">
+          <div class="breakdown-fill" data-key="${b.key}" style="width:0%"></div>
+        </div>
+        <span class="breakdown-weight">${(b.weight * 100).toFixed(0)}%</span>
+        <span class="breakdown-value" data-key="${b.key}">--</span>`;
+      barsContainer.appendChild(row);
+    });
+  }
+
+  // Parameters
+  const paramsList = el.querySelector('.algo-params-list');
+  const paramValues = {};
+  if (algo.params && algo.params.length > 0) {
+    algo.params.forEach(p => {
+      paramValues[p.n] = p.default;
+      const row = document.createElement('div');
+      row.className = 'param-row';
+      row.innerHTML = `
+        <span class="param-label">${p.n}</span>
+        <input type="range" class="param-slider" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.default}">
+        <span class="param-value-display">${p.default}</span>
+        <span class="param-unit">${p.unit}</span>`;
+      const slider = row.querySelector('.param-slider');
+      const display = row.querySelector('.param-value-display');
+      slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        display.textContent = v;
+        paramValues[p.n] = v;
+        logConsole('info', algo.id, `${p.n} = ${v} ${p.unit}`);
+      });
+      paramsList.appendChild(row);
+    });
+  } else {
+    paramsList.innerHTML = '<div style="color:var(--text-3);font-size:11px;padding:4px 0;">No tunable parameters</div>';
+  }
+
+  // Reset params
+  el.querySelector('.btn-reset-params').addEventListener('click', () => {
+    if (!algo.params) return;
+    algo.params.forEach(p => {
+      paramValues[p.n] = p.default;
+      const rows = paramsList.querySelectorAll('.param-row');
+      rows.forEach(r => {
+        if (r.querySelector('.param-label').textContent === p.n) {
+          r.querySelector('.param-slider').value = p.default;
+          r.querySelector('.param-value-display').textContent = p.default;
+        }
+      });
+    });
+    logConsole('info', algo.id, 'Parameters reset to defaults');
+  });
+
+  // Start/stop
+  const toggleBtn = el.querySelector('.btn-algo-toggle');
+  let running = false;
+  toggleBtn.addEventListener('click', () => {
+    running = !running;
+    const badge = el.querySelector('.algo-state-badge');
+    if (running) {
+      badge.dataset.state = 'acquiring';
+      badge.textContent = 'ACQUIRING';
+      toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+      logConsole('success', algo.id, 'Custom algorithm started');
+      setTimeout(() => {
+        if (running && activePanels[pid]) {
+          const allAvail = sensors.every(sk => sensorData[sk] && sensorData[sk].online);
+          badge.dataset.state = allAvail ? 'valid' : 'low_quality';
+          badge.textContent = allAvail ? 'VALID' : 'LOW QUALITY';
+        }
+      }, 2000);
+    } else {
+      badge.dataset.state = 'idle';
+      badge.textContent = 'IDLE';
+      toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+      logConsole('info', algo.id, 'Custom algorithm stopped');
+    }
+    updateRunningCount();
+  });
+
+  el.querySelector('.btn-panel-close').addEventListener('click', () => removePanel(pid));
+
+  activePanels[pid] = {
+    type: 'custom-algo', algoId, element: el, algo, paramValues,
+    running: false, history: [], metricHistories: {}
+  };
+  // Init per-metric histories
+  if (algo.metrics) {
+    algo.metrics.forEach(m => { activePanels[pid].metricHistories[m.key] = []; });
+  }
+
+  showPanel(el);
+  renderSensorList();
+  renderAlgoList();
+
+  requestAnimationFrame(() => {
+    const canvas = el.querySelector('.algo-waveform-canvas');
+    if (canvas) sizeCanvas(canvas);
+  });
+}
+
+// ─── Custom Algo Panel Updates ───────────────────────────────
+function updateCustomAlgoPanelsWithSensor(sensorKey) {
+  Object.values(activePanels).forEach(p => {
+    if (p.type !== 'custom-algo') return;
+    const sensors = p.algo.sensors || p.algo.channels || [];
+    if (!sensors.includes(sensorKey)) return;
+    const badge = p.element.querySelector('.algo-state-badge');
+    if (!badge || badge.dataset.state === 'idle') return;
+
+    const sd = sensorData[sensorKey];
+    if (!sd || sd.history.length < 3) return;
+    const latestVal = sd.history[sd.history.length - 1];
+
+    const range = p.algo.range;
+    let output = Math.max(range[0], Math.min(range[1], latestVal));
+
+    // Primary output
+    const outEl = p.element.querySelector('.algo-output-value');
+    outEl.textContent = output.toFixed(p.algo.unit === 'BPM' || p.algo.unit === 'steps' ? 0 : 1);
+
+    // SQI
+    const sqi = computeSimulatedSQI(p.algo, sensorKey);
+    updateSQIGauge(p.element, sqi);
+
+    // Waveform
+    p.history.push(output);
+    if (p.history.length > HISTORY_MAX) p.history.shift();
+    drawSparkline(p.element.querySelector('.algo-waveform-canvas'), p.history, '#a855f7');
+
+    // Multi-metric simulation
+    if (p.algo.metrics) {
+      p.algo.metrics.forEach(m => {
+        const simVal = output + (Math.random() - 0.5) * (m.range ? (m.range[1] - m.range[0]) * 0.05 : 2);
+        const clamped = m.range ? Math.max(m.range[0], Math.min(m.range[1], simVal)) : simVal;
+        const valEl = p.element.querySelector(`.metric-value[data-key="${m.key}"]`);
+        if (valEl) valEl.textContent = clamped.toFixed(1);
+        if (p.metricHistories[m.key]) {
+          p.metricHistories[m.key].push(clamped);
+          if (p.metricHistories[m.key].length > HISTORY_MAX) p.metricHistories[m.key].shift();
+        }
+      });
+    }
+
+    // Breakdown simulation
+    if (p.algo.breakdown) {
+      p.algo.breakdown.forEach(b => {
+        const subVal = Math.max(0, Math.min(100, 50 + (Math.random() - 0.5) * 40));
+        const fillEl = p.element.querySelector(`.breakdown-fill[data-key="${b.key}"]`);
+        const valEl = p.element.querySelector(`.breakdown-value[data-key="${b.key}"]`);
+        if (fillEl) fillEl.style.width = subVal + '%';
+        if (valEl) valEl.textContent = subVal.toFixed(0);
+      });
+    }
+
+    // Update sensor chips
+    const inputsList = p.element.querySelector('.algo-inputs-list');
+    if (inputsList) {
+      const chips = inputsList.querySelectorAll('.algo-input-chip');
+      chips.forEach((chip, i) => {
+        const sk = sensors[i];
+        const isAvail = sensorData[sk] && sensorData[sk].online;
+        chip.className = 'algo-input-chip ' + (isAvail ? 'available' : 'missing');
+      });
+    }
+  });
+}
+
+// ─── Remove Custom Algo ──────────────────────────────────────
+function removeCustomAlgo(algoId) {
+  const idx = CUSTOM_ALGOS.findIndex(a => a.id === algoId);
+  if (idx === -1) return;
+  // Close panel if open
+  const pid = 'custom-' + algoId;
+  if (activePanels[pid]) removePanel(pid);
+  CUSTOM_ALGOS.splice(idx, 1);
+  // Update storage
+  try {
+    const saved = JSON.parse(localStorage.getItem('openpulse-custom-algos') || '[]');
+    const filtered = saved.filter(c => c.id !== algoId);
+    localStorage.setItem('openpulse-custom-algos', JSON.stringify(filtered));
+  } catch (_) {}
+  renderAlgoList();
+  logConsole('info', 'SYS', `Removed custom algorithm: ${algoId}`);
 }

@@ -86,10 +86,18 @@
             <button class="filter-tab" data-filter="base">Base</button>
             <button class="filter-tab" data-filter="fusion">Fusion</button>
             <button class="filter-tab" data-filter="composite">Composite</button>
+            <button class="filter-tab" data-filter="custom">Custom</button>
           </div>
         </div>
         <div class="algo-list" id="algo-list">
           <!-- Populated by JS -->
+        </div>
+        <div class="algo-import-section">
+          <button class="btn-import-algo" id="btn-import-algo" title="Import a custom algorithm display.js">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Import Custom Algorithm</span>
+          </button>
+          <input type="file" id="algo-file-input" accept=".js" multiple style="display:none">
         </div>
       </div>
     </aside>
@@ -196,6 +204,74 @@
         <div class="stat-item"><span class="stat-label">Avg</span><span class="stat-value raw-avg">--</span></div>
         <div class="stat-item"><span class="stat-label">σ</span><span class="stat-value raw-std">--</span></div>
         <div class="stat-item"><span class="stat-label">Rate</span><span class="stat-value raw-rate">--</span></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<!-- Custom Algorithm Panel Template (multi-metric / score breakdown) -->
+<template id="tpl-custom-algo-panel">
+  <div class="panel algo-panel custom-panel" data-panel-type="custom-algo">
+    <div class="panel-header">
+      <div class="panel-header-left">
+        <div class="panel-icon custom-algo-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <div class="panel-info">
+          <span class="panel-title"></span>
+          <span class="panel-subtitle"></span>
+        </div>
+      </div>
+      <div class="panel-header-right">
+        <span class="custom-algo-badge">CUSTOM</span>
+        <div class="algo-state-badge" data-state="idle">IDLE</div>
+        <button class="panel-btn btn-algo-toggle" title="Start/Stop">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </button>
+        <button class="panel-btn btn-panel-close" title="Close panel">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="panel-body">
+      <div class="algo-meta-row"></div>
+      <!-- Primary output -->
+      <div class="algo-top-row">
+        <div class="algo-output-section">
+          <div class="algo-output-value">--</div>
+          <div class="algo-output-unit"></div>
+        </div>
+        <div class="algo-sqi-section">
+          <div class="sqi-gauge">
+            <svg viewBox="0 0 100 60" class="sqi-svg">
+              <path d="M10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--surface-3)" stroke-width="8" stroke-linecap="round"/>
+              <path d="M10 50 A 40 40 0 0 1 90 50" fill="none" stroke="var(--accent)" stroke-width="8" stroke-linecap="round" class="sqi-arc" stroke-dasharray="126" stroke-dashoffset="126"/>
+            </svg>
+            <div class="sqi-label">
+              <span class="sqi-value">--</span>
+              <span class="sqi-text">SQI</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Multi-metric grid (hidden if not multi-metric) -->
+      <div class="custom-metrics-grid" id="metrics-grid" style="display:none"></div>
+      <!-- Score breakdown (hidden if not score type) -->
+      <div class="custom-breakdown-section" id="breakdown-section" style="display:none">
+        <div class="section-label">Score Breakdown</div>
+        <div class="breakdown-bars"></div>
+      </div>
+      <!-- Sensor inputs -->
+      <div class="algo-inputs-section">
+        <div class="section-label">Required Sensors</div>
+        <div class="algo-inputs-list"></div>
+      </div>
+      <div class="algo-waveform-section">
+        <canvas class="algo-waveform-canvas"></canvas>
+      </div>
+      <div class="algo-params-section">
+        <div class="section-label">Parameters <button class="btn-reset-params" title="Reset to defaults">↻</button></div>
+        <div class="algo-params-list"></div>
       </div>
     </div>
   </div>

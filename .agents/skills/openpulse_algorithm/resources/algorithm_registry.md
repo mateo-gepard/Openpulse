@@ -80,8 +80,21 @@
 | C10 | Personalized Insights | All | 3 | ○ pending | — | — | — |
 
 ## Progress Summary
-- **Total algorithms**: 72 (27 base + 17 cross-sensor + 10 composite + 6 drivers + 12 reserved)
+- **Total algorithms**: 72 core + U-series user-created (27 base + 17 cross-sensor + 10 composite + 6 drivers)
 - **Specs written**: 1
 - **Implemented**: 0
 - **Tested**: 0
 - **Validated**: 0
+
+## Phase 4: User-Created Algorithms (U-Series)
+
+User-created algorithms get auto-assigned IDs in the U01–U99 range.
+To assign next ID: scan `algorithms/U[0-9][0-9]_*/` directories, take max + 1.
+
+| ID | Name | Category | Channels | Tier | Status | Spec | Code | Tests |
+|----|------|----------|----------|------|--------|------|------|-------|
+| — | *(none yet)* | — | — | — | — | — | — | — |
+
+<!-- When a U-series algorithm is created, add a row here:
+| U01 | Tennis Forehand | sport-motion | ACCEL+GYRO | 1 | ● complete | spec | code | tests |
+-->

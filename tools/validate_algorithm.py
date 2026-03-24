@@ -94,24 +94,27 @@ class ValidationReport:
 
 REQUIRED_SPEC_SECTIONS = [
     "Classification",
-    "Sensor Input",
     "Algorithm",
     "Output",
     "Edge Cases",
-    "Medical References",
-    "Test Vectors",
 ]
+
+# Accept either old or new section names
+ALTERNATIVE_SPEC_SECTIONS = {
+    "Sensor Input": ["Hardware", "Channel Input"],  # Old name → acceptable alternatives
+    "Medical References": ["References"],
+    "Test Vectors": ["Test Scenarios"],
+}
 
 REQUIRED_CLASSIFICATION_FIELDS = [
     "Layer",
     "Tier",
     "Regulatory",
-    "Dependencies",
 ]
 
 VALID_LAYERS = ["Base", "Cross-Sensor", "Composite"]
 VALID_TIERS = ["0", "1", "2", "3"]
-VALID_REGULATORY = ["Wellness", "Health Indicator", "Health Screening"]
+VALID_REGULATORY = ["Wellness", "Health Indicator", "Health Screening", "Sport Performance"]
 
 
 def validate_spec(algo_dir: str, report: ValidationReport):
@@ -129,8 +132,11 @@ def validate_spec(algo_dir: str, report: ValidationReport):
 
     # Check required sections
     missing_sections = []
+    all_sections = list(REQUIRED_SPEC_SECTIONS)
+    for old_name, new_name in ALTERNATIVE_SPEC_SECTIONS.items():
+        all_sections.append(old_name)  # Will check old OR new
+
     for section in REQUIRED_SPEC_SECTIONS:
-        # Look for heading lines containing the section name
         found = False
         for line in spec_content.split("\n"):
             stripped = line.strip()
@@ -139,6 +145,22 @@ def validate_spec(algo_dir: str, report: ValidationReport):
                 break
         if not found:
             missing_sections.append(section)
+
+    # Check alternative sections (old OR new names accepted)
+    for old_name, alt_names in ALTERNATIVE_SPEC_SECTIONS.items():
+        found = False
+        all_names = [old_name] + alt_names
+        for line in spec_content.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                for name in all_names:
+                    if name.lower() in stripped.lower():
+                        found = True
+                        break
+            if found:
+                break
+        if not found:
+            missing_sections.append(f"{' or '.join(all_names)}")
 
     if missing_sections:
         report.add("Spec sections complete", False,

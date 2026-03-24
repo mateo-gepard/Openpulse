@@ -252,13 +252,19 @@ Dashboard with cards. Each card is the visualization of a module's output.
 Openpulse/
 ├── .agents/skills/openpulse_algorithm/   # AI Algorithm Builder Skill
 │   ├── SKILL.md                          #   Master rules (medical, privacy, firmware)
-│   ├── templates/spec_template.md        #   Blank algorithm spec template
+│   ├── templates/
+│   │   ├── spec_template.md              #   Blank algorithm spec template
+│   │   ├── display_module_template.js    #   Dashboard display module template
+│   │   ├── firmware_header_template.h    #   C++ algorithm header template
+│   │   ├── firmware_impl_template.cpp    #   C++ algorithm implementation template
+│   │   └── tier3_dashboard_template.js   #   Tier 3 interactive test dashboard
 │   ├── examples/A01_heart_rate_spec.md   #   Reference spec (full detail)
 │   └── resources/
 │       ├── AlgorithmBase.h               #   Shared types + base class
 │       ├── RingBuffer.h                  #   Timestamped buffer + stats
 │       ├── SensorDriverBase.h            #   Sensor driver interfaces
-│       └── algorithm_registry.md         #   Master tracker (72 algorithms)
+│       ├── algorithm_registry.md         #   Master tracker (72 algorithms)
+│       └── sensor_validation.md          #   Channel-to-sensor hardware truth tables
 │
 ├── algorithms/                           # Algorithm Specs (54 directories)
 │   ├── A01_heart_rate/spec.md            #   Base algorithms (A01–A27)
@@ -267,22 +273,25 @@ Openpulse/
 │   └── ...
 │
 ├── firmware/
-│   ├── sensor_dashboard.ino              # Dev prototype firmware (v5)
+│   ├── openpulse.ino                     # Orchestrator firmware (v6)
 │   ├── src/
-│   │   ├── framework/                    #   AlgorithmBase, RingBuffer, filters
+│   │   ├── framework/                    #   AlgorithmBase, RingBuffer, Scheduler, filters
 │   │   ├── drivers/                      #   Sensor I2C drivers (per chip)
 │   │   ├── algorithms/
 │   │   │   ├── base/                     #   A01–A27 implementations
 │   │   │   └── fusion/                   #   X01–X17 implementations
 │   │   └── ble/                          #   BLE GATT service definitions
 │   ├── test/
-│   │   └── test_runner.cpp               #   Desktop test harness (clang++)
+│   │   ├── test_runner.cpp               #   Desktop test harness (clang++)
+│   │   └── template_compile_test.cpp     #   Template compilation validator
 │   └── imu_test/imu_test.ino            #   IMU diagnostic sketch
 │
-├── dashboard/                            # Web Dashboard (dev prototype)
-│   ├── index.html
-│   ├── style.css
-│   └── app.js
+├── dev/
+│   ├── dashboard/                        # Web DevWorkbench
+│   │   ├── index.html
+│   │   ├── style.css
+│   │   └── app.js
+│   └── README.md
 │
 ├── app/                                  # Mobile App (Phase 2+)
 │   └── src/
@@ -347,6 +356,14 @@ Openpulse/
 - **Resilient Polling** — individual characteristic errors don't crash the polling loop
 - **Light/Dark Theme** — toggleable, persisted in localStorage
 - **Debug Panel** — raw BLE hex data with timestamps
+- **Channel-Based Algorithm Availability** — algorithms display per-channel pills showing which data channels they require; three visual states indicate availability based on connected sensors:
+  - *Available* (green border) — all required channels are online
+  - *Partial* (orange border, dimmed) — some channels available, algorithm cannot run
+  - *Unavailable* (grayed out, non-interactive) — no required channels detected
+- **Active Channels Strip** — summary bar at the top of the sensor list showing which data channels are currently live
+- **Custom Algorithm Import** — import community or user-built `display.js` modules directly into the dashboard; parses `export default` / `module.exports` config objects and registers them as live algorithm panels
+- **Custom Algorithm Panels** — imported algorithms render with multi-metric grids, score breakdown bars, SQI gauge, waveform canvas, and tunable parameters; persisted across sessions via localStorage
+- **Algorithm Sorting** — available algorithms are sorted to the top; unavailable ones sink to the bottom with disabled interaction
 
 ---
 
@@ -382,13 +399,18 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | 10-section master rulebook: medical correctness, privacy, firmware engineering, signal processing, code generation, review checklist |
-| `templates/spec_template.md` | Blank algorithm spec — fill in to define any new algorithm |
+| `SKILL.md` | 12-section master rulebook: medical correctness, privacy, firmware engineering, signal processing, code generation, review checklist, multi-output algorithms, sensor fusion |
+| `templates/spec_template.md` | Blank algorithm spec — fill in to define any new algorithm (includes sport-specific edge cases) |
+| `templates/display_module_template.js` | Dashboard display module template with multi-metric grid + score breakdown support |
+| `templates/firmware_header_template.h` | C++ algorithm header template (`.h` file) |
+| `templates/firmware_impl_template.cpp` | C++ algorithm implementation template (`.cpp` file) |
+| `templates/tier3_dashboard_template.js` | Tier 3 interactive dashboard test scenario template |
 | `examples/A01_heart_rate_spec.md` | Complete reference spec (adaptive peak detection, SQI computation, 7 test vectors) |
 | `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, `AlgoState`, `AlgoTier`, base class |
 | `resources/RingBuffer.h` | Timestamped circular buffer with stats + cross-sensor interpolation |
 | `resources/SensorDriverBase.h` | Typed driver interfaces: `PPGECGDriver`, `TempDriver`, `EDADriver`, `BioimpedanceDriver`, `IMUDriver`, `MicDriver` |
 | `resources/algorithm_registry.md` | Master tracker for all 72 algorithms — status, specs, progress |
+| `resources/sensor_validation.md` | Channel-to-sensor mapping rules, hardware truth tables, PPG LED modes, IMU rate configs |
 
 ### Key Rules Enforced
 
@@ -408,6 +430,13 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 - No `delay()` — state machines only
 - Motion artifact rejection for all PPG/ECG algorithms
 - 5+ test vectors per algorithm
+
+**Algorithm Pipeline**
+- Registry lookup validates algorithm ID and resolves dependencies before generation
+- Dependency resolution ensures prerequisite algorithms exist (e.g., X01 needs A01 + A02)
+- Category router handles derived states like Recovery/Composite/Sleep that span multiple sensor categories
+- Multi-output algorithms (e.g., HRV → RMSSD + SDNN + pNN50) use structured `AlgorithmOutput` arrays
+- Sensor fusion algorithms declare all input channels and validate cross-channel synchronization
 
 ### How to Use
 
@@ -487,6 +516,24 @@ GitHub repository for community algorithms. Review process for trust level progr
 ---
 
 ## Changelog
+
+### v6.2 (Dashboard Intelligence + Skill Hardening)
+- **Channel-Based Algorithm Awareness**: Dashboard algorithms now show per-channel requirement pills. Connected sensors determine which algorithms are available (green), partially available (orange), or unavailable (grayed out). Algorithms sort available-first for quick access.
+- **Active Channels Strip**: New summary bar above sensor list displays all currently live data channels at a glance.
+- **Custom Algorithm Import**: Users can import `display.js` module files into the dashboard. The parser extracts config from `export default` or `module.exports` and registers them as fully interactive algorithm panels with multi-metric grids, score breakdown bars, SQI gauges, waveform canvas, and tunable parameters. Imported algorithms persist in localStorage.
+- **SKILL.md Hardening (9 Fixes)**: Walkthrough-tested all three user scenarios ("build HR from spec", "build custom sleep algo", "add SpO2 from registry") and two edge cases. Fixes applied:
+  - §1.4 Registry Lookup — validates algorithm ID before generation
+  - §1.5 Dependency Resolution — ensures prerequisite algorithms exist
+  - Category router now handles derived states (Recovery, Composite, Sleep)
+  - Hardware truth table split: PPG LED modes (Green/Red+IR/All) and IMU configurable rates
+  - Auto Mode pipeline now includes registry + dependency step
+  - §9.8 Multi-Output Algorithms — structured output arrays for HRV, sleep phases, etc.
+  - §10.8 SpO2 Processing + §10.9 Sensor Fusion reference implementations
+  - Step 6b Tier 3 test scenarios with `tier3_dashboard_template.js`
+  - §12.4 Multi-Metric and Score Breakdown display layouts
+- **New Templates**: `display_module_template.js`, `firmware_header_template.h`, `firmware_impl_template.cpp`, `tier3_dashboard_template.js`
+- **New Resources**: `sensor_validation.md` — channel-to-sensor mapping rules and hardware truth tables
+- **Bug Fixes**: Fixed `SENSOR_DEFS`/`SERVICE_UUID` naming inconsistencies in dashboard, corrected `panel.sdef` → `panel.cdef`, unified `algo.sensors || algo.channels || []` pattern across all algorithm lookups
 
 ### v6.1 (Algorithm Skill Upgrade)
 - **Oura-Style Baselines**: Implemented dual-horizon baseline model (short-term vs long-term) with exponential smoothing and calibrated UI wait times.

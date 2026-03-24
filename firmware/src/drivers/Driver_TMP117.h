@@ -17,8 +17,17 @@ public:
     void update(uint32_t now_ms) override {
         if (status_ != DriverStatus::RUNNING || now_ms - lastRead_ < 1000) return;
         lastRead_ = now_ms;
-        temp_ = (int16_t)readReg16(0x00) * 0.0078125f;
+        uint16_t raw = readReg16(0x00);
+        temp_ = (int16_t)raw * 0.0078125f;
         sample_ = { temp_, now_ms, (temp_ > -40.0f && temp_ < 125.0f) };
+        // Debug: log first few reads
+        if (debugCount_ < 5) {
+            debugCount_++;
+            Serial.print(F("  [TMP117] raw=0x"));
+            Serial.print(raw, HEX);
+            Serial.print(F(" temp="));
+            Serial.println(temp_);
+        }
     }
     void sleep() override { writeReg16(0x01, 0x0420); status_ = DriverStatus::SLEEPING; }
     void wake()  override { writeReg16(0x01, 0x0220); status_ = DriverStatus::RUNNING; }
@@ -38,6 +47,7 @@ private:
     SensorSample sample_ = {};
     float temp_ = 0;
     uint32_t lastRead_ = 0;
+    uint8_t debugCount_ = 0;
     uint16_t readReg16(uint8_t r) {
         Wire.beginTransmission(0x48); Wire.write(r); Wire.endTransmission(false);
         Wire.requestFrom((uint8_t)0x48,(uint8_t)2);

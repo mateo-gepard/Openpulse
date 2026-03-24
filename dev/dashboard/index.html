@@ -130,16 +130,28 @@
     </main>
   </div>
 
-  <!-- ═══ Bottom Console ═══ -->
+  <!-- ═══ Bottom Console + Serial ═══ -->
   <div class="console-bar" id="console-bar">
     <div class="console-header" id="console-toggle">
       <div class="console-header-left">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-        <span>Console</span>
-        <span class="console-badge" id="console-badge" style="display:none">0</span>
+        <div class="console-tabs">
+          <button class="console-tab active" data-tab="console">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span>Console</span>
+            <span class="console-badge" id="console-badge" style="display:none">0</span>
+          </button>
+          <button class="console-tab" data-tab="serial">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M6 8l4 4-4 4"/><line x1="12" y1="16" x2="18" y2="16"/></svg>
+            <span>Serial</span>
+            <span class="serial-status-dot" id="serial-status-dot"></span>
+          </button>
+        </div>
       </div>
       <div class="console-header-right">
-        <button class="console-btn" id="btn-clear-console" title="Clear">
+        <button class="console-btn serial-only" id="btn-serial-connect" title="Connect Serial" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        </button>
+        <button class="console-btn" id="btn-clear-active" title="Clear">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
         </button>
         <button class="console-btn" id="btn-toggle-console" title="Expand/Collapse">
@@ -148,7 +160,33 @@
       </div>
     </div>
     <div class="console-body" id="console-body">
-      <div class="console-output" id="console-output"></div>
+      <div class="console-pane active" data-pane="console">
+        <div class="console-output" id="console-output"></div>
+      </div>
+      <div class="console-pane" data-pane="serial">
+        <div class="serial-toolbar">
+          <button class="serial-btn" id="btn-serial-toggle">
+            <span class="serial-connect-label">Connect</span>
+          </button>
+          <select class="serial-baud" id="serial-baud">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200" selected>115200</option>
+            <option value="230400">230400</option>
+            <option value="460800">460800</option>
+            <option value="921600">921600</option>
+          </select>
+          <label class="serial-checkbox"><input type="checkbox" id="serial-autoscroll" checked> Auto-scroll</label>
+          <label class="serial-checkbox"><input type="checkbox" id="serial-timestamps"> Timestamps</label>
+        </div>
+        <div class="console-output serial-output" id="serial-output"></div>
+        <div class="serial-input-bar">
+          <input type="text" class="serial-input" id="serial-input" placeholder="Send to device..." autocomplete="off" disabled>
+          <button class="serial-send-btn" id="serial-send" disabled>Send</button>
+        </div>
+      </div>
     </div>
   </div>
 

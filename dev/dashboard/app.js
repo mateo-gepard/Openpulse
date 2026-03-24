@@ -144,9 +144,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   $('#btn-connect').addEventListener('click', toggleConnection);
   $('#btn-theme').addEventListener('click', () => applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
-  $('#console-toggle').addEventListener('click', toggleConsole);
-  $('#btn-clear-console').addEventListener('click', clearConsole);
   $('#btn-toggle-console').addEventListener('click', e => { e.stopPropagation(); toggleConsole(); });
+  $('#btn-clear-active').addEventListener('click', clearActivePane);
+  initConsoleTabs();
+  initSerialMonitor();
   $('#algo-search').addEventListener('input', e => { algoSearchText = e.target.value.toLowerCase(); renderAlgoList(); });
 
   $$('.filter-tab').forEach(btn => {
@@ -173,7 +174,25 @@ function applyTheme(theme) {
   localStorage.setItem('openpulse-theme', theme);
 }
 
-// ─── Console ─────────────────────────────────────────────────
+// ─── Console Tabs ────────────────────────────────────────────
+let activeConsoleTab = 'console';
+
+function initConsoleTabs() {
+  $$('.console-tab').forEach(tab => {
+    tab.addEventListener('click', e => {
+      e.stopPropagation();
+      switchConsoleTab(tab.dataset.tab);
+      if (!consoleIsExpanded) toggleConsole();
+    });
+  });
+}
+
+function switchConsoleTab(tabId) {
+  activeConsoleTab = tabId;
+  $$('.console-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+  $$('.console-pane').forEach(p => p.classList.toggle('active', p.dataset.pane === tabId));
+}
+
 function toggleConsole() {
   consoleIsExpanded = !consoleIsExpanded;
   $('#console-bar').classList.toggle('expanded', consoleIsExpanded);
@@ -184,10 +203,14 @@ function toggleConsole() {
   }
 }
 
-function clearConsole() {
-  $('#console-output').innerHTML = '';
-  consoleCount = 0;
-  $('#console-badge').style.display = 'none';
+function clearActivePane() {
+  if (activeConsoleTab === 'console') {
+    $('#console-output').innerHTML = '';
+    consoleCount = 0;
+    $('#console-badge').style.display = 'none';
+  } else {
+    $('#serial-output').innerHTML = '';
+  }
 }
 
 function logConsole(level, tag, msg) {
@@ -1314,4 +1337,144 @@ function removeCustomAlgo(algoId) {
   } catch (_) {}
   renderAlgoList();
   logConsole('info', 'SYS', `Removed custom algorithm: ${algoId}`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Serial Monitor — Web Serial API
+// ═══════════════════════════════════════════════════════════════
+
+let serialPort = null;
+let serialReader = null;
+let serialWriter = null;
+let serialConnected = false;
+let serialLineBuffer = '';
+
+function initSerialMonitor() {
+  const btnToggle = $('#btn-serial-toggle');
+  const sendBtn = $('#serial-send');
+  const sendInput = $('#serial-input');
+
+  if (!('serial' in navigator)) {
+    serialLog('Web Serial API not available. Use Chrome or Edge.', true);
+    btnToggle.disabled = true;
+    return;
+  }
+
+  btnToggle.addEventListener('click', e => {
+    e.stopPropagation();
+    if (serialConnected) serialDisconnect();
+    else serialConnect();
+  });
+
+  sendBtn.addEventListener('click', e => { e.stopPropagation(); serialSend(); });
+  sendInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.stopPropagation(); serialSend(); }
+  });
+
+  // Prevent clicks inside serial pane from toggling the console
+  const serialPane = document.querySelector('[data-pane="serial"]');
+  if (serialPane) serialPane.addEventListener('click', e => e.stopPropagation());
+}
+
+async function serialConnect() {
+  try {
+    serialPort = await navigator.serial.requestPort();
+    const baud = parseInt($('#serial-baud').value, 10);
+    await serialPort.open({ baudRate: baud });
+
+    serialConnected = true;
+    $('#btn-serial-toggle').textContent = 'Disconnect';
+    $('#btn-serial-toggle').classList.add('connected');
+    $('#serial-status-dot').classList.add('connected');
+    $('#serial-input').disabled = false;
+    $('#serial-send').disabled = false;
+    serialLog(`Connected at ${baud} baud`, true);
+    logConsole('success', 'SER', `Serial connected at ${baud} baud`);
+
+    if (serialPort.writable) {
+      serialWriter = serialPort.writable.getWriter();
+    }
+
+    // Read loop
+    serialLineBuffer = '';
+    while (serialPort.readable && serialConnected) {
+      serialReader = serialPort.readable.getReader();
+      try {
+        while (true) {
+          const { value, done } = await serialReader.read();
+          if (done) break;
+          const text = new TextDecoder().decode(value);
+          processSerialData(text);
+        }
+      } catch (err) {
+        if (serialConnected) serialLog(`Read error: ${err.message}`, true);
+      } finally {
+        serialReader.releaseLock();
+        serialReader = null;
+      }
+    }
+  } catch (err) {
+    if (err.name !== 'NotFoundError') {
+      serialLog(`Connection failed: ${err.message}`, true);
+    }
+  }
+}
+
+async function serialDisconnect() {
+  serialConnected = false;
+  try {
+    if (serialReader) { await serialReader.cancel(); serialReader = null; }
+    if (serialWriter) { serialWriter.releaseLock(); serialWriter = null; }
+    if (serialPort) { await serialPort.close(); serialPort = null; }
+  } catch (_) {}
+  $('#btn-serial-toggle').textContent = 'Connect';
+  $('#btn-serial-toggle').classList.remove('connected');
+  $('#serial-status-dot').classList.remove('connected');
+  $('#serial-input').disabled = true;
+  $('#serial-send').disabled = true;
+  serialLog('Disconnected', true);
+  logConsole('info', 'SER', 'Serial disconnected');
+}
+
+function processSerialData(text) {
+  serialLineBuffer += text;
+  const lines = serialLineBuffer.split('\n');
+  // Keep the last incomplete chunk in the buffer
+  serialLineBuffer = lines.pop();
+  for (const line of lines) {
+    const clean = line.replace(/\r$/, '');
+    if (clean.length > 0) serialLog(clean, false);
+  }
+}
+
+async function serialSend() {
+  const input = $('#serial-input');
+  const text = input.value.trim();
+  if (!text || !serialWriter) return;
+  try {
+    await serialWriter.write(new TextEncoder().encode(text + '\n'));
+    serialLog('> ' + text, false);
+    input.value = '';
+  } catch (err) {
+    serialLog(`Send error: ${err.message}`, true);
+  }
+}
+
+function serialLog(text, isSystem) {
+  const output = $('#serial-output');
+  if (!output) return;
+  const line = document.createElement('div');
+  line.className = 'serial-line' + (isSystem ? ' serial-sys' : '');
+
+  if ($('#serial-timestamps').checked) {
+    const ts = new Date().toLocaleTimeString('en-GB', { hour12: false, fractionalSecondDigits: 3 });
+    line.innerHTML = `<span class="serial-ts">${ts}</span>${escapeHtml(text)}`;
+  } else {
+    line.textContent = text;
+  }
+
+  output.appendChild(line);
+  // Cap at 2000 lines
+  while (output.children.length > 2000) output.removeChild(output.firstChild);
+  if ($('#serial-autoscroll').checked) output.scrollTop = output.scrollHeight;
 }

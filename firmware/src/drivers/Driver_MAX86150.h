@@ -19,17 +19,49 @@ public:
             status_ = DriverStatus::NOT_FOUND;
             return false;
         }
-        // Reset
-        writeReg(0x0D, 0x01);   // System Control: reset
+
+        // ── Reset ──────────────────────────────────
+        writeReg(0x0D, 0x01);   // System Control: RESET
         delay(100);
-        // Configure PPG
-        writeReg(0x09, 0x21);   // FIFO config: rollover, 4 sample avg
-        writeReg(0x0E, 0x40);   // PPG config 1: IR + Red, 100Hz
-        writeReg(0x0F, 0x06);   // PPG config 2: 18-bit, 411µs pulse
-        writeReg(0x11, 0x1F);   // LED1 (IR) current: 6.2mA
-        writeReg(0x12, 0x1F);   // LED2 (Red) current: 6.2mA
-        // Enable FIFO
-        writeReg(0x0D, 0x04);   // Start sampling
+
+        // Wait for reset to self-clear
+        for (uint8_t i = 0; i < 10; i++) {
+            if ((readReg(0x0D) & 0x01) == 0) break;
+            delay(10);
+        }
+
+        // ── Clear FIFO pointers ────────────────────
+        writeReg(0x04, 0x00);   // FIFO_WR_PTR
+        writeReg(0x05, 0x00);   // OVF_COUNTER
+        writeReg(0x06, 0x00);   // FIFO_RD_PTR
+
+        // ── FIFO Configuration ─────────────────────
+        writeReg(0x08, 0x10);   // Rollover enabled, no sample avg
+
+        // ── FIFO Data Control ──────────────────────
+        writeReg(0x09, 0x21);   // FD1=PPG_IR(0x1), FD2=PPG_RED(0x2)
+        writeReg(0x0A, 0x00);   // FD3/FD4 disabled
+
+        // ── PPG Configuration ──────────────────────
+        // Reg 0x0E: [7]=rsvd, [6:4]=PPG_SR, [3:2]=PPG_ADC_RGE, [1:0]=PPG_LED_PW
+        //   PPG_SR    = 011 → 100 Hz
+        //   ADC_RGE   = 11  → 32768 nA (widest)
+        //   LED_PW    = 11  → 400µs / 18-bit
+        writeReg(0x0E, 0x3F);   // 100Hz, 32768nA, 400µs
+        writeReg(0x0F, 0x00);   // PPG config 2: defaults
+
+        // ── LED Currents ───────────────────────────
+        writeReg(0x11, 0x3F);   // LED1 (IR):  12.6 mA
+        writeReg(0x12, 0x3F);   // LED2 (Red): 12.6 mA
+
+        // ── Start ──────────────────────────────────
+        writeReg(0x0D, 0x04);   // FIFO_EN=1, SHDN=0
+
+        // Verify Part ID (optional debug)
+        uint8_t partID = readReg(0xFF);
+        Serial.print(F("  [MAX86150] Part ID: 0x"));
+        Serial.println(partID, HEX);
+
         status_ = DriverStatus::RUNNING;
         sampleRate_ = 100;
         return true;
@@ -38,11 +70,23 @@ public:
     void update(uint32_t now_ms) override {
         if (status_ != DriverStatus::RUNNING) return;
         // Read FIFO pointer to get available samples
-        uint8_t wrPtr = readReg(0x04);
-        uint8_t rdPtr = readReg(0x06);
+        uint8_t wrPtr = readReg(0x04) & 0x1F;
+        uint8_t rdPtr = readReg(0x06) & 0x1F;
         int available = (int)wrPtr - (int)rdPtr;
         if (available < 0) available += 32;
-        if (available == 0) return;
+        if (available == 0) {
+            // Debug: periodically log if FIFO stays empty
+            if (now_ms - lastDebug_ > 5000) {
+                lastDebug_ = now_ms;
+                Serial.print(F("  [MAX86150] FIFO empty  wr="));
+                Serial.print(wrPtr);
+                Serial.print(F(" rd="));
+                Serial.print(rdPtr);
+                Serial.print(F(" sys=0x"));
+                Serial.println(readReg(0x0D), HEX);
+            }
+            return;
+        }
 
         // Read up to 4 samples per call (non-blocking budget)
         int toRead = (available > 4) ? 4 : available;
@@ -109,6 +153,7 @@ private:
     float dcIR_ = 0, dcRed_ = 0;
     float sampleRate_ = 100;
     uint32_t lastUpdate_ = 0;
+    uint32_t lastDebug_ = 0;
 
     void writeReg(uint8_t reg, uint8_t val) {
         Wire.beginTransmission(0x5E);

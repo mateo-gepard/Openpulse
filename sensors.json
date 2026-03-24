@@ -1,0 +1,32 @@
+{
+  "channels": [
+    { "id": "ppg",       "name": "PPG (IR+Red)",   "unit": "counts", "type": "multi",  "fields": ["ir", "red"],       "ble_uuid_suffix": "1" },
+    { "id": "ecg",       "name": "ECG",             "unit": "mV",     "type": "scalar",                                "ble_uuid_suffix": "2" },
+    { "id": "skin_temp", "name": "Skin Temperature","unit": "°C",     "type": "scalar",                                "ble_uuid_suffix": "3" },
+    { "id": "eda",       "name": "EDA / GSR",       "unit": "µS",     "type": "scalar",                                "ble_uuid_suffix": "4" },
+    { "id": "bioz",      "name": "Bioimpedance",    "unit": "Ω",      "type": "scalar",                                "ble_uuid_suffix": "5" },
+    { "id": "env_temp",  "name": "Env Temperature", "unit": "°C",     "type": "scalar",                                "ble_uuid_suffix": "6" },
+    { "id": "accel",     "name": "Accelerometer",   "unit": "g",      "type": "vec3",   "fields": ["x", "y", "z"],    "ble_uuid_suffix": "7" },
+    { "id": "gyro",      "name": "Gyroscope",       "unit": "°/s",    "type": "vec3",   "fields": ["x", "y", "z"],    "ble_uuid_suffix": "8" },
+    { "id": "mic",       "name": "Microphone",      "unit": "dB",     "type": "scalar",                                "ble_uuid_suffix": "9" },
+    { "id": "humidity",  "name": "Humidity",         "unit": "%",      "type": "scalar",                                "ble_uuid_suffix": "A" },
+    { "id": "pressure",  "name": "Barometric Pressure","unit": "hPa", "type": "scalar",                                "ble_uuid_suffix": "B" }
+  ],
+
+  "chips": [
+    { "id": "MAX86150", "provides": ["ppg", "ecg"],                       "bus": "I2C",     "addr": "0x5E", "description": "Optical PPG + ECG AFE (production)" },
+    { "id": "MAX30102", "provides": ["ppg"],                              "bus": "I2C",     "addr": "0x57", "description": "Optical PPG sensor (dev board)" },
+    { "id": "TMP117",   "provides": ["skin_temp"],                        "bus": "I2C",     "addr": "0x48", "description": "±0.1°C precision temperature (production)" },
+    { "id": "MCP9808",  "provides": ["skin_temp"],                        "bus": "I2C",     "addr": "0x18", "description": "±0.25°C temperature (dev board)" },
+    { "id": "BME280",   "provides": ["env_temp", "humidity", "pressure"], "bus": "I2C",     "addr": "0x76", "description": "Environmental sensor (dev board)" },
+    { "id": "ADS1115",  "provides": ["eda"],                              "bus": "I2C",     "addr": "0x49", "description": "16-bit ADC for GSR (production)" },
+    { "id": "AD5933",   "provides": ["bioz"],                             "bus": "I2C",     "addr": "0x0D", "description": "Impedance analyzer (production)" },
+    { "id": "LSM6DS3",  "provides": ["accel", "gyro"],                    "bus": "I2C",     "addr": "0x6A", "description": "6-axis IMU (onboard XIAO)" },
+    { "id": "PDM",      "provides": ["mic"],                              "bus": "digital", "addr": null,   "description": "PDM microphone (onboard XIAO)" }
+  ],
+
+  "profiles": {
+    "dev":  { "chips": ["MAX30102", "BME280", "MCP9808", "LSM6DS3", "PDM"],               "description": "XIAO BLE Sense dev board with breakout sensors" },
+    "prod": { "chips": ["MAX86150", "TMP117", "ADS1115", "AD5933", "LSM6DS3", "PDM"],     "description": "Production puck with medical-grade sensors" }
+  }
+}

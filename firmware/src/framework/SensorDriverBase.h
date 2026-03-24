@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include "RingBuffer.h"
+#include "Channels.h"
 
 // ─── Driver Status ─────────────────────────────────────────────
 
@@ -69,6 +70,11 @@ public:
 
     // ── Power ──
     virtual float getPowerConsumption_mA() const = 0;  // Current draw
+
+    // ── Channel mapping ──
+    // Returns bitmask of which data channels this driver provides.
+    // Algorithms and BLE reference channels, never chip names.
+    virtual ChannelMask getChannels() const = 0;
 };
 
 // ─── Specific Driver Interfaces ────────────────────────────────

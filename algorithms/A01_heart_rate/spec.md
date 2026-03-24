@@ -4,15 +4,16 @@
 - **Layer**: Base
 - **Tier**: 0 (realtime — called every loop iteration)
 - **Regulatory**: Wellness
-- **Puck**: 1 (MAX86150 PPG)
+- **Hardware**: Any providing CH_PPG
 - **Priority**: P0 (MVP)
-- **Dependencies**: none (uses raw PPG driver directly)
+- **Consumes**: CH_PPG
+- **Outputs**: float bpm
+- **Consumed by**: A02 (HRV), A24 (Calories), X01 (PTT-BP), C01 (Recovery Score)
 
-## Sensor Input
-- **Chip**: MAX86150
-- **Channel**: PPG IR (infrared, 880nm)
+## Channel Input
+- **Channel**: CH_PPG
 - **Sample Rate**: 100 Hz
-- **Bit Depth**: 18-bit unsigned
+- **Bit Depth**: 18-bit unsigned (minimum)
 - **Buffer Size**: 512 samples (5.12 seconds at 100 Hz)
 - **Minimum data**: 4 valid beats before first output
 
@@ -48,8 +49,11 @@
 
 7. **Output Gating**:
    - If finger not detected (perfusion index < 0.1%), output 0 and state = IDLE.
-   - If SQI < 0.4, suppress output (state = LOW_QUALITY).
    - If < 4 valid beats collected, state = ACQUIRING.
+
+### Alternative Methods
+- **Method A**: HeartPy Adaptive Moving Average (van Gent et al. 2019). Highly robust against motion artifacts; preferred for daily tracking.
+- **Method B**: NeuroKit2 Gradient-Based (Makowski et al. 2021). Low latency, computationally cheaper; preferred when patient is strictly resting.
 
 ### Parameters
 
@@ -74,13 +78,24 @@ SQI is computed from three factors (weighted average):
 
 1. **Perfusion Index** (40%): `PI = (AC_amplitude / DC_level) × 100`. PI > 1% = good. Scale linearly: 0% → SQI 0.0, 2% → SQI 1.0.
 
+1. **Perfusion Index** (40%): `PI = (AC_amplitude / DC_level) × 100`. PI > 1% = good. Scale linearly: 0% → SQI 0.0, 2% → SQI 1.0.
+
 2. **Peak prominence** (30%): How clearly the peaks stand out from noise. `prominence = peak_height / noise_floor`. prominence > 5 = good. Scale: 1 → SQI 0.0, 5 → SQI 1.0.
 
-3. **Motion energy** (30%): From IMU accelerometer magnitude. `motion = |accel| - 1.0g`. motion < 0.1g = still (SQI 1.0), motion > 0.5g = moving (SQI 0.0).
+3. **Motion energy** (30%): Based on IMU continuous motion_level `[0.0 - 1.0]`. Heart rate is robust up to ~1.0g motion. Scale: 0.1g → SQI 1.0, 1.0g → SQI 0.0.
 
 ```
 SQI = 0.4 * sqi_perfusion + 0.3 * sqi_prominence + 0.3 * sqi_motion
 ```
+- **SQI Threshold**: 0.3 (Minimum quality required to emit output. HR is relatively robust.)
+
+### Power & Resources
+- **Power Mode**: continuous
+- **Expected Current Draw**: 0.6 mA active / 0.1 mA idle
+
+## Validation
+- **Validation Dataset**: MIT-BIH Arrhythmia Database
+- **Accuracy Target**: MAE < 2 BPM vs. ECG reference
 
 ## Output
 - **Type**: AlgorithmOutput (value + sqi + timestamp + valid)
@@ -111,14 +126,14 @@ SQI = 0.4 * sqi_perfusion + 0.3 * sqi_prominence + 0.3 * sqi_motion
 4. Pan J, Tompkins WJ, "A Real-Time QRS Detection Algorithm", IEEE Trans. Biomed. Eng., 1985. (Adapted for PPG context)
 5. Maxim Integrated, "AN6409: Guidelines for SpO2 Measurement Using the MAX30101/MAX30102", 2018.
 
-## Test Vectors
+## Test Scenarios (Simulation)
 
-| # | Input Scenario | Expected Output | Tolerance | Source |
-|---|---------------|-----------------|-----------|--------|
-| 1 | Clean synthetic 72 BPM PPG waveform (100Hz, 10s) | 72 BPM | ±2 BPM | Computed from known IBI of 833ms |
-| 2 | Clean synthetic 40 BPM (bradycardia) | 40 BPM | ±2 BPM | IBI = 1500ms |
-| 3 | Clean synthetic 180 BPM (exercise) | 180 BPM | ±3 BPM | IBI = 333ms |
-| 4 | Zero signal (no finger, all zeros) | 0 BPM | exact | No peaks → no output |
-| 5 | Signal with 2s motion burst in middle | Holds last valid, then recovers | ±5 BPM | Last valid before artifact, recovery after |
-| 6 | Gradually increasing HR (60→120 over 30s) | Tracks within 5 BPM of true | ±5 BPM | 8-beat EMA lag expected |
-| 7 | Low perfusion (amplitude 10% of normal) | Detects if PI > 0.1%, else 0 | ±3 BPM | Threshold behavior |
+| # | Scenario | Expected Output | Tolerance |
+|---|----------|-----------------|-----------|
+| 1 | Clean synthetic 72 BPM PPG waveform, high SNR | 72 BPM | ±2 BPM |
+| 2 | Bradycardia 40 BPM, high SNR | 40 BPM | ±2 BPM |
+| 3 | Tachycardia 180 BPM, medium SNR | 180 BPM | ±3 BPM |
+| 4 | Zero signal (no finger, all zeros) | 0 BPM | exact |
+| 5 | Signal with 2s heavy motion burst (1.5g) | Holds last valid | ±5 BPM |
+| 6 | Gradually increasing HR (60→120 over 30s) | Tracks true | ±5 BPM |
+| 7 | Low perfusion (amplitude 10% of normal) | Detects if PI > 0.1% | ±3 BPM |

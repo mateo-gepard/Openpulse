@@ -8,9 +8,8 @@
 - **Priority**: P0 (MVP) | P1 (v1.0) | P2 (v2.0)
 - **Dependencies**: [none] | [A01, A02, ...]
 
-## Sensor Input
-- **Chip**: <chip name>
-- **Channel**: <which channel/register>
+## Channel Input
+- **Channel**: <CH_PPG, CH_ECG, CH_SKIN_TEMP, etc.>
 - **Sample Rate**: <Hz>
 - **Bit Depth**: <bits>
 - **Buffer Size**: <samples> (<duration at sample rate>)
@@ -24,7 +23,11 @@
 2. **Feature extraction**: <peaks, intervals, amplitudes, frequency decomposition>
 3. **Computation**: <the actual formula / model>
 4. **Post-processing**: <averaging, outlier rejection, smoothing>
-5. **Output gating**: <SQI threshold, minimum data, no-signal behavior>
+5. **Output gating**: <minimum data, no-signal behavior>
+
+### Alternative Methods
+- **Method A**: <Name, Reference, Tradeoff>
+- **Method B**: <Name, Reference, Tradeoff>
 
 ### Parameters
 | Parameter | Value | Unit | Source |
@@ -32,9 +35,16 @@
 | <name> | <value> | <unit> | <citation or rationale> |
 
 ### SQI Computation
-<!-- How signal quality is assessed for this specific algorithm.
-     Must return 0.0 (garbage) to 1.0 (perfect).
-     Below 0.4 = output suppressed. -->
+<!-- How signal quality is assessed for this specific algorithm. Incorporate IMU motion-level. -->
+- **SQI Threshold**: <0.0–1.0> (Minimum quality required to emit output)
+
+### Power & Resources
+- **Power Mode**: continuous | duty-cycled | on-demand
+- **Expected Current Draw**: <mA active> / <mA idle>
+
+## Validation
+- **Validation Dataset**: <PhysioNet DB Name | Custom>
+- **Accuracy Target**: <Metric> ± <Tolerance> vs. <Reference>
 
 ## Output
 - **Type**: AlgorithmOutput | CalibratedOutput
@@ -58,11 +68,11 @@
 1. <Author>, "<Title>", <Journal>, <Year>. DOI: <doi>
 2. <Manufacturer>, "<App Note Title>", <Year>.
 
-## Test Vectors
-| # | Input Scenario | Expected Output | Tolerance | Source |
-|---|---------------|-----------------|-----------|--------|
-| 1 | Normal physiological signal | <value> | ±<tol> | <source of expected value> |
-| 2 | Boundary low (physiological minimum) | <value> | ±<tol> | |
-| 3 | Boundary high (physiological maximum) | <value> | ±<tol> | |
-| 4 | No signal (sensor off / no contact) | 0 or NaN | exact | |
-| 5 | Motion artifact burst | hold / suppress | — | |
+## Test Scenarios (Simulation)
+| # | Scenario | Expected Output | Tolerance |
+|---|----------|-----------------|-----------|
+| 1 | <Clean 72 BPM, SNR 20dB> | <value> | ±<tol> |
+| 2 | <Boundary low> | <value> | ±<tol> |
+| 3 | <Boundary high> | <value> | ±<tol> |
+| 4 | <No signal> | 0 or NaN | exact |
+| 5 | <Heavy motion artifact> | hold / suppress | — |

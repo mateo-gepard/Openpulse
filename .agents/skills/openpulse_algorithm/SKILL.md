@@ -34,17 +34,16 @@ Never access a dependency's internal state — only use its public API.
 Cross-reference the spec against this hardware truth table. If the spec claims data the hardware cannot provide, **flag it immediately**.
 
 ```
-┌────────────────┬────────────┬────────────┬─────────────┬──────────┐
-│ Sensor         │ Chip       │ Bus        │ Max Rate    │ Bits     │
-├────────────────┼────────────┼────────────┼─────────────┼──────────┤
-│ PPG + ECG      │ MAX86150   │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │
-│ Skin Temp      │ TMP117     │ Wire, 0x48 │ 1 Hz        │ 16-bit   │
-│ EDA / GSR      │ ADS1115    │ Wire, 0x49 │ 10 Hz       │ 16-bit   │
-│ Bioimpedance   │ AD5933     │ Wire, 0x0D │ On-demand   │ 12-bit   │
-│ IMU            │ LSM6DS3TR  │ Wire1,0x6A │ 50 Hz       │ 16-bit   │
-│ Microphone     │ PDM        │ Digital    │ 16000 Hz    │ 16-bit   │
-│ NFC            │ nRF52840   │ Internal   │ On-demand   │ —        │
-└────────────────┴────────────┴────────────┴─────────────┴──────────┘
+┌────────────────┬──────────────┬────────────┬─────────────┬──────────┐
+│ Channel        │ Typical Chip │ Bus        │ Max Rate    │ Bits     │
+├────────────────┼──────────────┼────────────┼─────────────┼──────────┤
+│ CH_PPG / ECG   │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │
+│ CH_SKIN_TEMP   │ TMP117       │ Wire, 0x48 │ 1 Hz        │ 16-bit   │
+│ CH_EDA         │ ADS1115      │ Wire, 0x49 │ 10 Hz       │ 16-bit   │
+│ CH_BIOZ        │ AD5933       │ Wire, 0x0D │ On-demand   │ 12-bit   │
+│ CH_ACCEL/GYRO  │ LSM6DS3TR    │ Wire1,0x6A │ 50 Hz       │ 16-bit   │
+│ CH_MIC         │ PDM          │ Digital    │ 16000 Hz    │ 16-bit   │
+└────────────────┴──────────────┴────────────┴─────────────┴──────────┘
 ```
 
 ---
@@ -109,7 +108,9 @@ struct AlgorithmOutput {
 - **IMU**: Sensor self-test pass + no clipping at ±16g
 - **Temperature**: Rate of change < 2°C/min (faster = sensor detached)
 
-When SQI < 0.4: **suppress the output entirely** (show "--"). Don't show bad data — this is where consumer trackers fail. Whoop shows "recovering" when signal is bad; we show nothing, which is more honest.
+When SQI falls below the algorithm's specific **SQI Threshold** (defined in its spec): **suppress the output entirely** (show "--"). Don't show bad data — this is where consumer trackers fail. Whoop shows "recovering" when signal is bad; we show nothing, which is more honest. 
+
+*Note: Global thresholds do not work. SpO2 is extremely motion-sensitive and needs SQI ≥ 0.6. Heart rate is more robust and only needs SQI ≥ 0.3.*
 
 ### 2.4 Confidence Intervals
 
@@ -148,6 +149,17 @@ OpenPulse is NOT a medical device. Every algorithm MUST be classified:
 | **Health Screening** | Clinical-adjacent (SpO2, BP, ECG rhythm) | Show with disclaimer |
 
 For **Health Screening** algorithms, the firmware output struct includes a `disclaimer` flag, and the dashboard MUST display: *"This is not a medical device. Consult a healthcare provider for medical decisions."*
+
+### 2.7 Algorithm Dependency Graph
+
+Every algorithm explicitly declares its dependencies **and its outputs**, mapping what it consumes and what consumes it. This forms a pipeline architecture (Reference: BioSPPy pipeline dependency graphs, Bota et al. 2024).
+
+For example, `A01_heart_rate`:
+- **Consumes**: `CH_PPG`
+- **Outputs**: `float bpm`
+- **Consumed by**: `A02` (HRV), `A24` (Calories), `X01` (PTT-BP), `C01` (Recovery Score)
+
+This explicit mapping prevents cyclic dependencies and ensures the pipeline scheduler executes algorithms in the correct topological order.
 
 ---
 
@@ -299,25 +311,36 @@ No algorithm call may block for more than **1ms**. Specifically:
 
 ### 4.6 Motion Artifact Rejection
 
-Any algorithm using PPG or ECG MUST check IMU data before trusting the signal:
+Any algorithm using PPG or ECG MUST calculate a continuous motion level from the IMU before trusting the signal:
 
 ```cpp
-// Called before processing PPG/ECG sample
-bool isMotionFree(uint32_t now_ms) {
+// Called to compute motion intensity (0.0 = still, 1.0 = heavy motion)
+float computeMotionLevel(uint32_t now_ms) {
     float accelMag = sqrt(ax*ax + ay*ay + az*az);
-    float gyroMag  = sqrt(gx*gx + gy*gy + gz*gz);
-
-    // Thresholds from: Tamura et al., "Wearable Photoplethysmographic
-    // Sensors", Electronics 2014
-    return (accelMag < 1.5f) && (gyroMag < 50.0f);  // g's and deg/s
+    float motion_g = abs(accelMag - 1.0f); // Deviation from 1g gravity
+    
+    // Scale to 0.0-1.0 based on physiological maximums
+    return min(motion_g / 2.0f, 1.0f);
 }
 ```
 
-When motion is detected:
+The computed `motion_level` acts as a penalty factor in the SQI calculation. Sensitivity varies by algorithm (Reference: HeartPy van Gent et al. 2019):
+- **SpO2**: Unusable > 0.3g motion. SQI drops rapidly.
+- **Heart Rate**: Robust up to 1.0g motion using adaptive filtering.
+
+When motion exceeds the algorithm's tolerance:
 - **HR**: Hold last valid value for up to 5 seconds, then show "--"
 - **SpO2**: Suppress immediately (SpO2 is extremely motion-sensitive)
 - **ECG**: Mark segment as "motion artifact" in rhythm analysis
 - **PTT/Blood Pressure**: Suppress entirely during motion
+
+### 4.7 Sensor Manager & Hardware Modes
+
+A central `SensorManager` sits above the algorithms and orchestrates the physical chip configurations. When an on-demand algorithm is activated, it requests a hardware mode shift:
+
+- If `A05_ecg_rhythm` (on-demand) starts, the `SensorManager` transitions the MAX86150 from `PPG_ONLY` to `PPG_AND_ECG`.
+- The FIFO configuration and interrupt watermarks change.
+- The `SensorManager` prevents conflicts if multiple algorithms demand the same chip in mutually exclusive states, automatically halting lower-priority Tier 1/2 algorithms in favor of user-initiated Tier 2 algorithms.
 
 ---
 
@@ -346,21 +369,48 @@ const float b[] = { ... };
 const float a[] = { ... };
 ```
 
-### 5.2 Peak Detection
+### 5.2 Multi-Method Peak Detection
 
-For PPG and ECG peak detection, use **adaptive thresholding**:
+Do NOT use a single hardcoded peak detection method. Every algorithm must define at least two alternative methods with distinct trade-offs. The algorithm or the developer chooses the best method based on signal quality.
 
-```
-1. Compute running mean and standard deviation over window
-2. Threshold = mean + k * stddev  (k = 0.6 for PPG, 0.4 for ECG)
-3. Require minimum distance between peaks (refractory period)
-4. Validate peak morphology (slope before and after)
-5. Track detection confidence based on peak prominence
-```
+**For PPG:**
+1. **HeartPy Adaptive Moving Average**: Standard method, highly robust against noise. Uses a 0.75s moving average window to establish dynamic thresholds. (Reference: van Gent et al. 2019 "HeartPy: A novel heart rate algorithm for the analysis of noisy signals").
+2. **NeuroKit2 Gradient-Based**: Faster, lower latency, but less robust to artifact. (Reference: Makowski et al. 2021).
 
-Do NOT use fixed thresholds — they fail when signal amplitude changes (e.g., different skin tones, sensor placement).
+**For ECG:**
+1. **Pan-Tompkins Algorithm**: The gold standard. Higher latency due to integration windows, but robust. (Reference: Pan & Tompkins 1985).
+2. **Hamilton Algorithm**: Computationally faster, but less accurate during certain arrhythmias. (Reference: Hamilton 2002).
 
-### 5.3 Cross-Sensor Timestamp Alignment
+### 5.3 Standardized PPG Feature Nomenclature
+
+All algorithms operating on the PPG waveform MUST use the following standardized pyPPG nomenclature (Reference: Charlton et al. 2024 "pyPPG toolbox"):
+- **S**: Systolic Peak
+- **DN**: Dicrotic Notch
+- **D**: Diastolic Peak
+
+And the five points of the Second Derivative of PPG (SDPPG):
+- **a-wave**: Initial systole
+- **b-wave**: Deceleration
+- **c-wave**: Late systole
+- **d-wave**: Early diastole
+- **e-wave**: Late diastole
+
+### 5.4 EDA Decomposition and Sleep Staging
+
+**EDA Decomposition:**
+When separating tonic and phasic components of Electrodermal Activity, use **cvxEDA** as the reference methodology for isolating the Skin Conductance Level (SCL) and Skin Conductance Response (SCR). (Reference: Greco et al. 2016 "cvxEDA: A Convex Optimization Approach to EDA Processing", or Benedek & Kaernbach 2010).
+
+**Sleep Staging:**
+Sleep staging MUST occur in standard **30-second epochs**. Each epoch is classified as Wake, Light, Deep, or REM based on:
+- HR mean
+- HRV (RMSSD)
+- Continuous IMU RMS (motion energy)
+- Temperature Delta
+- EDA Variance
+
+For the MCU, use a weighted rule-based system. On the dashboard, use Machine Learning classification. (Reference: Whoop/Oura standard 30s epochs, reaching ~79% PSG agreement).
+
+### 5.5 Cross-Sensor Timestamp Alignment
 
 When combining data from sensors at different rates, **always interpolate to the fastest clock**:
 
@@ -372,17 +422,19 @@ float alignedEDA = edaBuffer.interpolateAt(ppgTimestamp);
 
 Never assume sensors are synchronized — always use `millis()` timestamps.
 
-### 5.4 Baseline Estimation
+### 5.6 Baseline Estimation (Oura Model)
 
-For metrics that need a personal baseline (temperature, EDA, resting HR):
+For metrics that need a personal baseline (temperature, HRV, resting HR), implement an Oura-style dual-horizon baseline model (Reference: Oura Readiness Contributors documentation):
 
-```
-1. Collect 14 nights of data minimum before establishing baseline
-2. Use MEDIAN, not mean (resistant to outliers)
-3. Update baseline with exponential moving average (α = 0.05)
-4. Detect baseline shifts (e.g., fitness improvement) and re-anchor
-5. Report deviation from baseline, not absolute values, for alerts
-```
+1. **Short-Term Baseline (Acute)**: 14-day weighted average, where the most recent 2–5 days are weighted heavily using exponential decay (α = 0.15).
+2. **Long-Term Baseline (Chronic)**: 2-month unweighted median.
+
+All "deviation" calculations (e.g. Temperature Delta) are computed by comparing the Short-Term Baseline against the Long-Term Baseline.
+
+**Wait Times and UI Presentation:**
+- **Days 1–3**: Collecting data. Show "Gathering baseline..."
+- **Day 4**: Show preliminary values with a "Will get more accurate" indicator.
+- **Day 14**: Show full, confident scores. (Reference: Whoop Recovery wait times).
 
 ---
 
@@ -483,36 +535,34 @@ AlgoState Algo_<ID>::getState() const {
 }
 ```
 
-### Step 3: Generate `test_vectors.h`
+### Step 3: Implement Signal Simulation (Test Vectors)
 
-At minimum 5 test cases:
+Instead of hardcoded arrays of floats, testing MUST use a signal simulation approach for generating test scenarios. Use mathematical models to construct physiological waveforms on the fly.
+
+For example, a test scenario requires generating a PPG wave with configurable:
+- Heart rate (40–200 BPM)
+- Amplitude (perfusion index)
+- Noise level (SNR)
+- Motion artifact intensity (0.0–1.0g)
+
+(Reference: NeuroKit2 biological signal simulators `nk.ppg_simulate()`, `nk.ecg_simulate()`, `nk.eda_simulate()`).
 
 ```cpp
-// Test vectors for <ID>: <Name>
-// Source: <where the expected values come from>
-struct TestVector {
-    const float* input;
-    uint16_t inputLen;
+// Simulated test scenarios for <ID>: <Name>
+struct TestScenario {
+    float heart_rate;
+    float snr_db;
+    float motion_g;
     float expectedOutput;
     float tolerance;
     const char* description;
 };
 
-static const TestVector TEST_VECTORS_<ID>[] = {
-    // 1. Normal physiological signal
-    { normalData, 512, expected, ±tolerance, "Clean 72 BPM signal" },
-
-    // 2. Boundary low
-    { bradyData, 512, expected, ±tolerance, "Bradycardia 40 BPM" },
-
-    // 3. Boundary high
-    { tachyData, 512, expected, ±tolerance, "Tachycardia 180 BPM" },
-
-    // 4. No signal / sensor off
-    { zeroData, 512, 0.0, 0.0, "No finger — expect 0" },
-
-    // 5. Motion artifact
-    { motionData, 512, HOLD_LAST, 0.0, "Motion — expect hold or suppress" },
+static const TestScenario TEST_SCENARIOS_<ID>[] = {
+    { 72.0f,  20.0f, 0.0f, 72.0f, ±2.0f, "Clean 72 BPM, high SNR" },
+    { 40.0f,  20.0f, 0.0f, 40.0f, ±2.0f, "Bradycardia 40 BPM" },
+    { 180.0f, 10.0f, 0.0f, 180.0f,±3.0f, "Tachycardia 180 BPM, low SNR" },
+    { 72.0f,   0.0f, 1.5f, 0.0f,   0.0f, "Heavy motion artifact — expect suppress" },
 };
 ```
 
@@ -532,7 +582,7 @@ Before marking the algorithm complete, verify:
 - [ ] Disclaimer flag set for Health Screening classification
 - [ ] No PII in any output struct
 - [ ] Edge cases from spec handled explicitly
-- [ ] Test vectors cover: normal, boundary, no-signal, artifact
+- [ ] Test scenarios simulate: normal, boundary, no-signal, artifact
 
 ---
 
@@ -608,12 +658,18 @@ A complete example spec is available at `.agents/skills/openpulse_algorithm/exam
 - **Priority**: P0 (MVP) | P1 (v1.0) | P2 (v2.0)
 - **Dependencies**: [none] | [A01, A02, ...]
 
-## Sensor Input
-- **Chip**: <chip name>
-- **Channel**: <which channel/register>
+## Channel Input
+- **Channel**: <CH_PPG, CH_ECG, CH_SKIN_TEMP, etc.>
 - **Sample Rate**: <Hz>
 - **Bit Depth**: <bits>
 - **Buffer Size**: <samples> (<duration at sample rate>)
+
+## Output
+- **Type**: float32 | CalibratedOutput | AlgorithmOutput
+- **Unit**: <BPM, %, °C, mmHg, ...>
+- **Valid Range**: <min>–<max>
+- **Update Rate**: <how often a new value is produced>
+- **BLE Characteristic**: UUID 12345678-1234-5678-1234-56789abcdef<X>
 
 ## Algorithm
 ### Method
@@ -622,7 +678,11 @@ A complete example spec is available at `.agents/skills/openpulse_algorithm/exam
 2. Feature extraction (peaks, intervals, amplitudes)
 3. Computation (the actual formula)
 4. Post-processing (averaging, outlier rejection)
-5. Output gating (SQI threshold, minimum data requirement)
+5. Output gating (minimum data requirement)
+
+### Alternative Methods
+- **Method A**: <Name, Reference, Tradeoff>
+- **Method B**: <Name, Reference, Tradeoff>
 
 ### Parameters
 | Parameter | Value | Unit | Source |
@@ -630,7 +690,16 @@ A complete example spec is available at `.agents/skills/openpulse_algorithm/exam
 | <name> | <value> | <unit> | <citation> |
 
 ### SQI Computation
-<How signal quality is assessed for this specific algorithm>
+<How signal quality is assessed for this specific algorithm. Incorporate IMU motion-level.>
+- **SQI Threshold**: <0.0–1.0> (Minimum quality required to emit output)
+
+### Power & Resources
+- **Power Mode**: continuous | duty-cycled | on-demand
+- **Expected Current Draw**: <mA active> / <mA idle>
+
+## Validation
+- **Validation Dataset**: <PhysioNet DB Name | Custom>
+- **Accuracy Target**: <Metric> ± <Tolerance> vs. <Reference>
 
 ## Output
 - **Type**: float32 | CalibratedOutput | AlgorithmOutput
@@ -652,12 +721,12 @@ A complete example spec is available at `.agents/skills/openpulse_algorithm/exam
 1. <Author>, "<Title>", <Journal>, <Year>. DOI: <doi>
 2. ...
 
-## Test Vectors
-| # | Input Scenario | Expected Output | Tolerance | Source |
-|---|---------------|-----------------|-----------|--------|
-| 1 | <normal case> | <value> | ±<tol> | <where expected value comes from> |
-| 2 | <edge case> | <value> | ±<tol> | |
-| 3 | <failure case> | <value> | — | |
+## Test Scenarios (Simulation)
+| # | Scenario | Expected Output | Tolerance |
+|---|----------|-----------------|-----------|
+| 1 | <Clean 72 BPM, SNR 20dB> | <value> | ±<tol> |
+| 2 | <Bradycardia> | <value> | ±<tol> |
+| 3 | <Heavy Motion Artifact> | <value> | — |
 ```
 
 ---
@@ -682,11 +751,12 @@ Test vectors:   algorithms/A01_heart_rate/test_vectors.h
 MEDICAL CORRECTNESS
   □ Every formula has a citation
   □ Output clamped to physiological range
-  □ SQI computed and gates output at threshold 0.4
+  □ Algorithm defines specific SQI threshold (replaces global 0.4)
   □ Confidence intervals reported where applicable
   □ Calibration state tracked and displayed
   □ Regulatory classification correct
   □ Disclaimer present for Health Screening algorithms
+  □ Algorithm Dependency Graph edges explicitly defined
 
 SIGNAL PROCESSING
   □ Filters respect Nyquist
@@ -710,7 +780,20 @@ PRIVACY
   □ Calibration data in localStorage only
 
 TESTING
-  □ ≥ 5 test vectors per algorithm
-  □ Covers: normal, boundary low, boundary high, no signal, artifact
-  □ Expected values sourced (not invented)
-```
+  □ Signal simulator used for scenario testing (replaces static vectors)
+  □ Covers: normal, boundary low, boundary high, no signal, heavy artifact
+  □ Validated against recommended PhysioNet DB
+
+---
+
+## 11. VALIDATION DATASETS
+
+When validating an algorithm offline or verifying accuracy, use the appropriate gold-standard open dataset:
+
+| Target Metric | Recommended PhysioNet Database | Accuracy Target |
+|---------------|--------------------------------|-----------------|
+| **Heart Rate** | MIT-BIH Arrhythmia Database | MAE < 2 BPM vs. ECG |
+| **HRV (RMSSD)** | MIT-BIH Normal Sinus Rhythm | Correlation $r \ge 0.95$ vs. ECG |
+| **SpO2** | MIMIC-III Waveform Database (ECG+PPG) | Bias < 2% vs. CO-Oximetry |
+| **Sleep Staging** | Sleep-EDF Database (Annotated PSG) | Cohen's $\kappa \ge 0.6$ (4-class) |
+| **PTT / BP** | MIMIC-III (Synchronous ECG+PPG+ABP) | RMSE < 5 mmHg (AAMI standard) |

@@ -488,6 +488,21 @@ GitHub repository for community algorithms. Review process for trust level progr
 
 ## Changelog
 
+### v6.1 (Algorithm Skill Upgrade)
+- **Oura-Style Baselines**: Implemented dual-horizon baseline model (short-term vs long-term) with exponential smoothing and calibrated UI wait times.
+- **Improved SQI & Motion Artifacts**: Transitioned to continuous motion penalty (`0.0 - 1.0g`) with per-algorithm configurable SQI thresholds.
+- **Signal Processing Advancements**: Added multi-method peak detection, **pyPPG** standardized feature nomenclature, and **cvxEDA** for 30-second epoch sleep staging.
+- **Hardware Orchestration**: Defined the **Sensor Manager** API to prevent sensor mode conflicts between continuous and on-demand algorithms.
+- **Validation Simulator**: Replaced static test vectors with dynamic **Test Scenarios (Signal Simulation)**, validating against standard databases (MIT-BIH, Sleep-EDF, MIMIC-III).
+
+### v6 (March 2026)
+- **Data Channel Architecture**: Completely decoupled hardware from software. Algorithms now depend on normalized physiological data channels (e.g., `CH_PPG`, `CH_ECG`) rather than physical chips (e.g., `MAX86150`).
+- **Runtime Puck Discovery**: Firmware probes I2C buses (`PuckDetector`), identifies connected sensors via `sensors.json` mapping, and configures the system dynamically without recompilation.
+- **Dynamic BLE Service**: `OpenPulseBLE` dynamically creates GATT characteristics only for the discovered and active channels, saving memory and bandwidth.
+- **Modular Dashboard**: `dev/dashboard/app.js` refactored to use `CHANNEL_DEFS`. Algorithm registry maps logic to abstract channels, making testing and algorithm validation hardware-agnostic.
+- **Strict Separation of Concerns**: Moved dashboard to `dev/` directory to clearly distinguish development tooling from production app architecture.
+- **Refactored Firmware Orchestrator**: Replaced monolithic 800-line `sensor_dashboard.ino` with a scalable ~130-line `openpulse.ino` orchestrator that relies on abstract drivers implementing `SensorDriverBase`.
+
 ### v5 (March 2026)
 - **IMU Power Fix**: explicit pin 15 management with nRF52840 high-drive GPIO register config, retry with full power cycle on init failure
 - **PDM Microphone**: 16 kHz mono sampling via interrupt callback, RMS → dB sound level (`dB = 20·log10(rms/32767) + 120`), new BLE characteristic (UUID `...def9`)

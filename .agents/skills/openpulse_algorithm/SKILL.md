@@ -167,63 +167,55 @@ Example: C01_recovery_score
 
 ---
 
-## 2. HARDWARE TRUTH TABLE & DEFAULT PUCK CONFIGURATION
+## 2. DATA CHANNEL ARCHITECTURE
 
-### 2.1 Hardware Truth Table
+### 2.1 CRITICAL RULE: Algorithms Are Hardware-Agnostic
 
-Cross-reference every algorithm against this table. If the spec claims data the hardware cannot provide, **flag it immediately**.
+**Algorithm specs MUST declare only abstract data channels (CH_PPG, CH_ECG, CH_ACCEL, etc.) — NEVER specific chip names, I2C addresses, bus types, or puck positions.** The v6 firmware architecture decouples algorithms from physical sensors entirely:
 
-```
-┌─────────────────────┬──────────────┬────────────┬─────────────┬──────────┬─────────┐
-│ Channel             │ Typical Chip │ Bus        │ Max Rate    │ Bits     │ Puck    │
-├─────────────────────┼──────────────┼────────────┼─────────────┼──────────┼─────────┤
-│ CH_PPG (Green LED)  │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
-│ CH_PPG (Red+IR LED) │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
-│ CH_ECG              │ MAX86150     │ Wire, 0x5E │ 100/200 Hz  │ 18-bit   │ Puck 1  │
-│ CH_SKIN_TEMP        │ TMP117       │ Wire, 0x48 │ 1 Hz        │ 16-bit   │ Puck 2  │
-│ CH_EDA              │ ADS1115      │ Wire, 0x49 │ 10 Hz       │ 16-bit   │ Puck 2  │
-│ CH_BIOZ             │ AD5933       │ Wire, 0x0D │ On-demand   │ 12-bit   │ Puck 3  │
-│ CH_ACCEL            │ LSM6DS3TR    │ Wire1,0x6A │ 12.5–416 Hz │ 16-bit   │ XIAO    │
-│ CH_GYRO             │ LSM6DS3TR    │ Wire1,0x6A │ 12.5–416 Hz │ 16-bit   │ XIAO    │
-│ CH_MIC              │ PDM          │ Digital    │ 16000 Hz    │ 16-bit   │ XIAO    │
-└─────────────────────┴──────────────┴────────────┴─────────────┴──────────┴─────────┘
-```
+- The **driver layer** (firmware/src/drivers/) translates physical chips → abstract channels
+- The **PuckDetector** discovers connected sensors at runtime via I2C scan
+- **ANY I2C sensor** that provides the correct channel data works — today's MAX86150 could be replaced by a MAX30101, ADPD4101, or any future PPG chip
+- Algorithms call `getChannelData(CH_PPG)` — they never see chip registers, bus addresses, or puck positions
 
-**PPG LED mode selection:**
-- **Green LED** — Use for heart rate, HRV, perfusion index. Better motion tolerance. Default for most algorithms.
-- **Red + IR LED** — Use for SpO2 (requires dual-wavelength ratio). Also used for vascular age, PPG waveform morphology.
-- The MAX86150 can switch modes programmatically. Specify the required mode in the spec.
+**In algorithm specs:**
+- ✅ `CH_PPG at 100 Hz, 18-bit minimum` — correct (channel + data requirements)
+- ✅ `PPG Mode: Red+IR` — correct (signal requirement, not chip command)
+- ❌ `MAX86150 at 100 Hz on Puck 1` — WRONG (hardcodes chip and position)
+- ❌ `Wire, 0x5E` — WRONG (bus detail belongs in driver, not algorithm)
 
-**IMU rate selection:**
-- LSM6DS3TR supports: 12.5, 26, 52, 104, 208, 416 Hz (higher rates available but rarely needed on wearable).
-- **Default: 50 Hz** (use `ODR_52Hz` register setting) — sufficient for step counting, activity recognition, sleep detection.
-- **High-rate: 104–208 Hz** — use for sport technique analysis (tennis serve, golf swing, running gait).
-- **Low-rate: 12.5–26 Hz** — use for long-duration monitoring where power savings matter (sleep, sedentary detection).
+### 2.2 Channel Capabilities Reference
 
-### 2.2 Default Puck Configuration
-
-**ALWAYS start with Puck 1 + Puck 2 + XIAO onboard sensors.** This is the default recommendation for all algorithms. Only add Puck 3 when the algorithm explicitly requires bioimpedance.
+This table describes what each channel provides. It is a **driver-level reference** for understanding channel capabilities — NOT for copying into algorithm specs.
 
 ```
-DEFAULT CONFIG (covers ~90% of algorithms):
-┌─────────────────────────────────────────────────────────────┐
-│ XIAO (always present):  CH_ACCEL, CH_GYRO, CH_MIC          │
-│ Puck 1 (default):       CH_PPG, CH_ECG                     │
-│ Puck 2 (default):       CH_SKIN_TEMP, CH_EDA               │
-│                                                             │
-│ Available channels: PPG, ECG, Temp, EDA, Accel, Gyro, Mic  │
-│ → Enough for ALL health, sleep, stress, and motion algos   │
-└─────────────────────────────────────────────────────────────┘
-
-EXTENDED CONFIG (only when bioimpedance needed):
-┌─────────────────────────────────────────────────────────────┐
-│ + Puck 3:               CH_BIOZ                            │
-│                                                             │
-│ Use cases: Body fat %, muscle mass, hydration level         │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────┬─────────────┬──────────┬──────────────────────────────────────┐
+│ Channel             │ Max Rate    │ Bits     │ Signal Description                   │
+├─────────────────────┼─────────────┼──────────┼──────────────────────────────────────┤
+│ CH_PPG (Green LED)  │ 100/200 Hz  │ 18-bit   │ Optical blood volume (green λ)       │
+│ CH_PPG (Red+IR LED) │ 100/200 Hz  │ 18-bit   │ Dual-wavelength optical (red + IR λ) │
+│ CH_ECG              │ 100/200 Hz  │ 18-bit   │ Cardiac electrical (Lead I)           │
+│ CH_SKIN_TEMP        │ 1 Hz        │ 16-bit   │ Skin surface temperature (±0.1°C)    │
+│ CH_EDA              │ 10 Hz       │ 16-bit   │ Electrodermal activity / GSR          │
+│ CH_BIOZ             │ On-demand   │ 12-bit   │ Bioelectrical impedance spectrum      │
+│ CH_ACCEL            │ 12.5–416 Hz │ 16-bit   │ 3-axis linear acceleration           │
+│ CH_GYRO             │ 12.5–416 Hz │ 16-bit   │ 3-axis angular velocity              │
+│ CH_MIC              │ 16000 Hz    │ 16-bit   │ Audio / acoustic envelope             │
+└─────────────────────┴─────────────┴──────────┴──────────────────────────────────────┘
 ```
 
-**Rule: Not every sensor needs to be used.** An algorithm declares ONLY the channels it actually reads. A heart rate algorithm uses CH_PPG and CH_ACCEL (for motion rejection) — it does NOT declare CH_EDA, CH_SKIN_TEMP, CH_MIC, etc., even though those sensors are physically present.
+**PPG LED mode selection** (algorithm declares which mode it needs — firmware handles the physical switch):
+- **Green LED** — HR, HRV, perfusion index. Better motion tolerance. Default for most algorithms.
+- **Red + IR LED** — SpO2 (requires dual-wavelength ratio). Also vascular age, PPG waveform morphology.
+
+**IMU rate selection** (algorithm declares the rate it needs — firmware configures the ODR register):
+- **Default: 50 Hz** — sufficient for step counting, activity recognition, sleep detection.
+- **High-rate: 104–208 Hz** — sport technique analysis (tennis serve, golf swing, running gait).
+- **Low-rate: 12.5–26 Hz** — long-duration monitoring where power savings matter (sleep, sedentary).
+
+### 2.3 Channel Declaration Rules
+
+**Rule: Not every channel needs to be used.** An algorithm declares ONLY the channels it actually reads. A heart rate algorithm uses CH_PPG and CH_ACCEL (for motion rejection) — it does NOT declare CH_EDA, CH_SKIN_TEMP, CH_MIC, etc., even though those sensors may be physically present.
 
 ---
 
@@ -264,7 +256,7 @@ PRE-FLIGHT SENSOR VALIDATION:
    → SUGGEST the correct channel(s) with rationale
    → WAIT for user acknowledgment before proceeding
 6. ADD motion rejection: If algorithm uses CH_PPG or CH_ECG, add CH_ACCEL
-7. DEFAULT puck config: Puck 1 + Puck 2 + XIAO unless Puck 3 (CH_BIOZ) needed
+7. NEVER hardcode chip names, puck positions, or I2C addresses in specs — channels only
 8. STRIP unused channels: Algorithm declares ONLY what it actually reads
 ```
 
@@ -274,10 +266,10 @@ These are errors users commonly make. If detected, **correct them proactively wi
 
 | User Says | Problem | Correct Response |
 |---|---|---|
-| "Heart rate from microphone" | Microphone captures sound, not cardiac rhythm | "Heart rate is measured via PPG (photoplethysmography) — Puck 1 shines light through skin and measures blood volume changes. You need CH_PPG, not CH_MIC." |
-| "Tennis swing detection with PPG" | PPG measures blood flow, not motion | "Racket swing detection needs the 6-axis IMU: CH_ACCEL + CH_GYRO on the XIAO. PPG can't detect arm angle or swing speed." |
-| "Stress from accelerometer" | Accelerometer measures motion, not autonomic nervous system | "Stress is measured via EDA (galvanic skin response from Puck 2) and/or HRV (from PPG on Puck 1). Accelerometer can distinguish stress from exercise but isn't the primary stress signal." |
-| "Body fat from temperature" | Temperature doesn't measure tissue composition | "Body composition requires bioimpedance (CH_BIOZ from Puck 3) — it sends a tiny current through tissue and measures impedance to estimate fat/muscle/water ratios." |
+| "Heart rate from microphone" | Microphone captures sound, not cardiac rhythm | "Heart rate is measured via PPG (photoplethysmography) — light shines through skin and measures blood volume changes. You need CH_PPG, not CH_MIC." |
+| "Tennis swing detection with PPG" | PPG measures blood flow, not motion | "Racket swing detection needs the 6-axis IMU: CH_ACCEL + CH_GYRO. PPG can't detect arm angle or swing speed." |
+| "Stress from accelerometer" | Accelerometer measures motion, not autonomic nervous system | "Stress is measured via EDA (galvanic skin response, CH_EDA) and/or HRV (derived from CH_PPG). Accelerometer can distinguish stress from exercise but isn't the primary stress signal." |
+| "Body fat from temperature" | Temperature doesn't measure tissue composition | "Body composition requires bioimpedance (CH_BIOZ) — it sends a tiny current through tissue and measures impedance to estimate fat/muscle/water ratios." |
 | "SpO2 from ECG" | ECG measures electrical activity, SpO2 needs optical | "SpO2 requires dual-wavelength optical measurement (PPG Red + IR). ECG measures heart's electrical signals, not blood oxygen saturation." |
 | Algorithm uses 6 sensors but only actually needs 2 | Over-provisioning wastes power and complexity | "Your algorithm only processes accelerometer data for step counting. I've stripped the unused channels (PPG, ECG, EDA, Temp, Mic) to reduce power draw and complexity." |
 
@@ -401,9 +393,9 @@ AI pre-fills recommendations based on Round 1, then presents for confirmation:
 ROUND 2 FORMAT:
 "Based on your description, here's what I recommend:
 
-  Channels:  CH_ACCEL + CH_GYRO (XIAO onboard IMU)
-  Puck config: Puck 1 + Puck 2 + XIAO (default — but this algorithm
-               only uses the XIAO's IMU)
+  Channels:  CH_ACCEL + CH_GYRO
+  Why only IMU channels: This algorithm detects movement patterns,
+               not physiological signals — no PPG/ECG/EDA needed.
   Why: Tennis forehand detection is a movement pattern. The 6-axis IMU
        captures arm acceleration (CH_ACCEL) and rotational velocity
        (CH_GYRO) at 50 Hz — enough to distinguish forehand from
@@ -740,7 +732,7 @@ Sensitivity varies:
 
 ### 9.7 Sensor Manager & Hardware Modes
 
-The `SensorManager` orchestrates physical chip configurations. When on-demand algorithms activate, it transitions the chip (e.g., MAX86150 from PPG_ONLY to PPG_AND_ECG). Prevents conflicts by halting lower-priority algorithms.
+The `SensorManager` orchestrates physical sensor configurations. When on-demand algorithms activate, it transitions the active PPG driver mode (e.g., from PPG_ONLY to PPG_AND_ECG). Prevents conflicts by halting lower-priority algorithms. Algorithms never reference chip names — they request channel modes.
 
 ### 9.8 Multi-Output Algorithms
 
@@ -834,7 +826,7 @@ Days 1–3: "Gathering baseline..." → Day 4: preliminary values → Day 14: co
 
 ### 10.8 SpO2-Specific Signal Processing
 
-SpO2 requires dual-wavelength PPG (Red + IR LEDs). The MAX86150 must be configured in **Red+IR mode** (not Green LED mode used for HR).
+SpO2 requires dual-wavelength PPG (Red + IR LEDs). The PPG driver must be configured in **Red+IR mode** (not Green LED mode used for HR). The algorithm spec declares `PPG Mode: Red+IR` — the firmware driver handles the physical LED switching for whatever chip is connected.
 
 **Processing pipeline:**
 1. **LED sequencing** — Red and IR LEDs alternate. Separate the interleaved samples into red[] and ir[] arrays.
@@ -1236,13 +1228,18 @@ All fields are **MANDATORY** unless marked (optional). No blanks. No TODOs.
 - **Outputs**: <type> <name> (<unit>)
 - **Consumed by**: [A02, X01, ...] | [none]
 
-## Hardware
-- **Required Pucks**: Puck 1 + XIAO | Puck 1 + Puck 2 + XIAO | All
-- **Channels Used**:
-  | Channel | Puck | Chip | Sample Rate | Purpose in This Algorithm |
-  |---------|------|------|-------------|---------------------------|
-  | CH_PPG  | Puck 1 | MAX86150 | 100 Hz | Primary signal source |
-  | CH_ACCEL | XIAO | LSM6DS3 | 50 Hz | Motion artifact rejection |
+## Channel Input
+
+Algorithms are hardware-agnostic. Declare ONLY the abstract data channels — NEVER chip names, puck positions, or I2C addresses.
+
+  | Channel | Sample Rate | Bit Depth | Purpose in This Algorithm |
+  |---------|-------------|-----------|---------------------------|
+  | CH_PPG  | 100 Hz | 18-bit | Primary signal source |
+  | CH_ACCEL | 50 Hz | 16-bit | Motion artifact rejection |
+
+- **PPG Mode** (if CH_PPG used): Green | Red+IR | All
+- **Buffer Size**: <samples> (<duration at sample rate>)
+- **Minimum data**: <what is needed before first valid output>
 
 ## Algorithm
 

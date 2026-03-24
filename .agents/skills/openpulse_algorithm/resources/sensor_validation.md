@@ -4,16 +4,19 @@ Quick-reference for the AI when selecting and validating sensor/channel assignme
 
 ## Channel Reference
 
-| Channel ID | Sensor Chip | Puck | Signal Type | Sample Rate |
-|------------|-------------|------|-------------|-------------|
-| CH_PPG | MAX86150 | Puck 1 | Optical blood volume (Red + IR LEDs) | 100–200 Hz |
-| CH_ECG | MAX86150 | Puck 1 | Cardiac electrical activity (Lead I) | 200 Hz |
-| CH_SKIN_TEMP | TMP117 | Puck 2 | Skin surface temperature | 1 Hz |
-| CH_EDA | ADS1115 | Puck 2 | Electrodermal activity (galvanic skin response) | 10 Hz |
-| CH_BIOZ | AD5933 | Puck 3 | Bioelectrical impedance | On-demand |
-| CH_ACCEL | LSM6DS3TR | XIAO | 3-axis linear acceleration | 50 Hz |
-| CH_GYRO | LSM6DS3TR | XIAO | 3-axis angular velocity | 50 Hz |
-| CH_MIC | PDM | XIAO | Audio / acoustic | 16000 Hz |
+Channels are abstract data interfaces. The firmware driver layer maps physical sensors to channels at runtime. **Algorithm specs reference channels only — never chip names, puck positions, or I2C addresses.** Any I2C sensor providing the correct data works.
+
+| Channel ID | Signal Type | Max Rate | Bits |
+|------------|-------------|----------|------|
+| CH_PPG (Green) | Optical blood volume (green wavelength) | 100–200 Hz | 18-bit |
+| CH_PPG (Red+IR) | Dual-wavelength optical (red + infrared) | 100–200 Hz | 18-bit |
+| CH_ECG | Cardiac electrical activity (Lead I) | 200 Hz | 18-bit |
+| CH_SKIN_TEMP | Skin surface temperature | 1 Hz | 16-bit |
+| CH_EDA | Electrodermal activity (galvanic skin response) | 10 Hz | 16-bit |
+| CH_BIOZ | Bioelectrical impedance | On-demand | 12-bit |
+| CH_ACCEL | 3-axis linear acceleration | 12.5–416 Hz | 16-bit |
+| CH_GYRO | 3-axis angular velocity | 12.5–416 Hz | 16-bit |
+| CH_MIC | Audio / acoustic | 16000 Hz | 16-bit |
 
 ## Algorithm → Channel Matrix
 
@@ -74,15 +77,14 @@ Quick-reference for the AI when selecting and validating sensor/channel assignme
 | Biological Age | Multiple vitals + activity | All available | Tier 3, composite score |
 | Health Report | All algorithms | All | Tier 3, PDF generation |
 
-## Puck Configuration Rules
+## Channel Declaration Rules
 
 ```
-Rule 1: ALWAYS start with Puck 1 + Puck 2 + XIAO
-Rule 2: Only recommend Puck 3 when CH_BIOZ is required
-Rule 3: Algorithm declares ONLY channels it reads — not all available
-Rule 4: If CH_PPG or CH_ECG is used, ADD CH_ACCEL for motion rejection
-Rule 5: If algorithm only needs IMU → document that only XIAO is needed
-         (Puck 1+2 present by default but unused by this algorithm)
+Rule 1: Algorithm declares ONLY channels it reads — not all available
+Rule 2: If CH_PPG or CH_ECG is used, ADD CH_ACCEL for motion rejection
+Rule 3: If algorithm requires CH_BIOZ, note that bioimpedance hardware is optional (not all users have it)
+Rule 4: NEVER name specific chips, puck positions, or I2C addresses in algorithm specs
+Rule 5: Declare the minimum sample rate and bit depth the algorithm requires — the driver provides at least that
 ```
 
 ## Common Sensor Mistakes

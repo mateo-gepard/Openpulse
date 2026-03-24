@@ -10,15 +10,16 @@
 - **Outputs**: <type> <name> (<unit>)
 - **Consumed by**: [A02, X01, ...] | [none]
 
-## Hardware
-- **Required Pucks**: Puck 1 + XIAO | Puck 1 + Puck 2 + XIAO | All
-- **Channels Used**:
+## Channel Input
 
-| Channel | Puck | Chip | Sample Rate | Purpose in This Algorithm |
-|---------|------|------|-------------|---------------------------|
-| CH_PPG  | Puck 1 | MAX86150 | 100 Hz | Primary signal source |
-| CH_ACCEL | XIAO | LSM6DS3 | 50 Hz | Motion artifact rejection |
+Algorithms are hardware-agnostic. Declare ONLY the abstract data channels this algorithm reads. The firmware's driver layer resolves channels to physical sensors at runtime — any I2C sensor providing the correct channel data will work.
 
+| Channel | Sample Rate | Bit Depth | Purpose in This Algorithm |
+|---------|-------------|-----------|---------------------------|
+| CH_PPG  | 100 Hz | 18-bit | Primary signal source |
+| CH_ACCEL | 50 Hz | 16-bit | Motion artifact rejection |
+
+- **PPG Mode** (if CH_PPG used): Green | Red+IR | All — specify which LED wavelengths are needed
 - **Buffer Size**: <samples> (<duration at sample rate>)
 - **Minimum data**: <what is needed before first valid output>
 

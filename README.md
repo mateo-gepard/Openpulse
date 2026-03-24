@@ -1,26 +1,66 @@
 # OpenPulse
 
-> **Open-source biometric sensor platform** — real-time health monitoring with cross-sensor fusion.  
-> 72 algorithms. 23 exclusive. No subscription. Your data. Open source.
+> **Open-source biometric sensor platform** — modular health monitoring with cross-sensor fusion.  
+> 51+ algorithm modules. No subscription. Your data. Open source.
 
 ![Status](https://img.shields.io/badge/status-dev%20prototype-orange)
 ![Platform](https://img.shields.io/badge/platform-XIAO%20nRF52840-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
+![Algorithms](https://img.shields.io/badge/algorithms-72-brightgreen)
+![Modules](https://img.shields.io/badge/modules-51+-brightgreen)
 
 ---
 
 ## What Is OpenPulse?
 
-OpenPulse is the only consumer-grade health tracker that combines **synchronized PPG+ECG, EDA, precision skin temperature, bioimpedance, a 6-axis IMU, and a PDM microphone** in a single device. This unique sensor combination enables **23 cross-sensor fusion features** that no other tracker in the world can offer.
+OpenPulse is the only consumer-grade health tracker that combines **synchronized PPG+ECG, EDA, precision skin temperature, bioimpedance, a 6-axis IMU, and a PDM microphone** in a single modular device.
+
+Three puck slots. Six sensors. 51+ algorithm modules. Your configuration. No subscription. Your data.
 
 The platform consists of:
-- **Firmware** — Arduino C++ running on a Seeed XIAO nRF52840 Sense
-- **Web Dashboard** — real-time Bluetooth LE visualization (no app store, no account, no cloud)
-- **Algorithm Catalog** — 72 biomedical algorithms built on top of the hardware
+- **Firmware** — Arduino C++ on Seeed XIAO nRF52840 Sense (pure data streaming, no algorithms on-device)
+- **App** — Module engine that loads algorithms based on your profile and connected sensors
+- **Algorithm Hub** — Open-source repository where anyone can publish verified health algorithms
+- **Developer SDK** — JavaScript/Python API for building custom modules
 
 ---
 
-## Current Hardware (Dev Prototype)
+## Competitive Analysis
+
+| Feature | Whoop 5.0 | Oura 4 | Garmin | Fitbit | **OpenPulse** |
+|---------|-----------|--------|--------|--------|---------------|
+| Heart Rate (PPG) | ✓ | ✓ | ✓ | ✓ | **✓ Puck 1** |
+| HRV | ✓ | ✓ | ✓ | ✓ | **✓ Puck 1** |
+| SpO2 | ✓ | ✓ | ✓ | ✓ | **✓ Puck 1** |
+| ECG | Only MG | ✓ | ✗ | ✓ | **✓ Puck 1** |
+| Blood Pressure (PTT) | Beta | ✗ | ✗ | ✗ | **✓ Puck 1** |
+| Respiratory Rate | ✓ | ✓ | ✓ | ✓ | **✓ Puck 1** |
+| Skin Temperature | ±1°C | ✓ | ✓ | ✓ | **±0.1°C Puck 2** |
+| EDA / Stress Sensor | ✗ | ✗ | ✗ | ✓ | **✓ Puck 2** |
+| Real-Time Stress | HR only | HR only | HR only | EDA | **EDA+HR** |
+| Accelerometer | ✓ | ✓ | ✓ | ✓ | **✓ XIAO** |
+| Gyroscope | ✗ | ✗ | ✓ | ✗ | **✓ XIAO** |
+| Bioimpedance | ✗ | ✗ | ✗ | ✗ | **✓ Puck 3** |
+| VO2max Estimate | ✓ | ✓ | ✓ | ✗ | **✓ Algo** |
+| Sleep Phases | ✓ | ✓ | ✓ | ✓ | **✓ 5-Signal** |
+| Recovery Score | ✓ | ✓ | ✓ | ✓ | **✓ 6-Source** |
+| Activity Recognition | ✓ | ✓ | ✓ | ✓ | **✓ IMU** |
+| Cycle Tracking | ✓ | ✓ | ✓ | ✓ | **✓ ±0.1°C** |
+| Biological Age | ✓ | ✗ | ✓ | ✗ | **✓ 12+ Biomarkers** |
+| AI Coach | ✓ | ✓ | ✗ | ✗ | **Community Algos** |
+| Raw Data Access | ✗ | ✗ | Limited | ✗ | **✓ Full** |
+| Open Source | ✗ | ✗ | ✗ | ✗ | **✓** |
+| Modular | ✗ | ✗ | ✗ | ✗ | **✓** |
+| Subscription Required | 199€/yr | 72€/yr | ✗ | 120€/yr | **✗** |
+| Price (Year 1) | 199–359€ | 421€ | 400€ | 370€ | **99–129€** |
+
+**Result:** OpenPulse matches or exceeds every competitor in every category — and is superior in ECG, PTT blood pressure, EDA stress, bioimpedance, temperature precision, raw data access, open source, and modularity. No subscription, buy once.
+
+---
+
+## Hardware
+
+### Current Dev Prototype
 
 | Sensor | Chip | Position | Measures | Interface |
 |--------|------|----------|----------|-----------|
@@ -30,7 +70,7 @@ The platform consists of:
 | 6-Axis IMU | LSM6DS3TR-C | Onboard | Accelerometer, Gyroscope | Wire1, 0x6A |
 | Microphone | PDM (integrated) | Onboard | Sound Level (dB) | Digital PDM |
 
-### Planned Hardware (Next Generation)
+### Production Hardware (Next Generation)
 
 | Sensor | Chip | Position | Measures | Interface |
 |--------|------|----------|----------|-----------|
@@ -41,6 +81,168 @@ The platform consists of:
 | 6-Axis IMU | LSM6DS3TR-C | XIAO | Accel + Gyro | Wire1, 50 Hz |
 | Microphone | PDM | XIAO | Audio Envelope, Snoring | Digital, 16 kHz |
 | NFC | nRF52840 | XIAO | Tap-to-Pair, Context | Integrated |
+
+---
+
+## Algorithm Modules — The Complete Toolkit
+
+Every module is a standalone building block that takes sensor data and produces a feature. Modules are auto-activated based on the user's profile and connected sensors. The user sees features on their dashboard — not modules.
+
+All modules are open source. **Verified** modules come pre-installed. **Community** modules appear in the "For You" section. **Experimental** modules are visible only in developer mode.
+
+### Heart & Circulation
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Heart Rate (Real-Time) | Puck 1 PPG | Continuous pulse, live display, HR zones |
+| Heart Rate Variability (HRV) | Puck 1 PPG | R-R intervals, RMSSD, day vs. night comparison |
+| Blood Oxygen (SpO2) | Puck 1 PPG | Red vs. IR light, continuous or on-demand |
+| ECG / EKG | Puck 1 ECG | Single-lead ECG, rhythm check, exportable report |
+| Blood Pressure (PTT) | Puck 1 PPG+ECG | Pulse Transit Time from synchronized PPG+ECG |
+| Respiratory Rate | Puck 1 PPG | Derived from PPG waveform modulation |
+| Resting HR Trend | Puck 1 PPG | 7/30/90-day trend, fitness development |
+
+### Sleep
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Sleep Phase Detection | IMU + Puck 1 + Puck 2 | Light, Deep (SWS), REM, Awake — from movement, HR, HRV, temp |
+| Sleep Score (0–100) | All | Weighted score: duration, efficiency, phases, consistency |
+| Sleep Duration vs. Need | Algo | Dynamic calculation based on strain and sleep debt |
+| Sleep Consistency | Algo | Deviation from usual sleep/wake times |
+| Sleep Disturbances | IMU | Wake events, restlessness phases |
+| Optimal Bedtime | Algo | Recommendation based on strain, debt, rhythm |
+| Nap Detection | IMU + Puck 1 | Automatic detection of daytime sleep |
+
+### Recovery & Readiness
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Recovery Score (0–100) | All | Morning readiness: HRV, resting HR, sleep, temp, stress |
+| Strain Score | Puck 1 + IMU | Cumulative daily load from HR zones and activity |
+| Training Recommendation | Algo | Based on recovery: Full Send / Normal / Light / Rest |
+| Recovery Time Estimate | Algo | Estimated hours until full recovery |
+| Overtraining Warning | Algo | Trend analysis: HRV drop + resting HR rise + sleep decline |
+
+### Activity & Fitness
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Step Counter | IMU | Hardware pedometer, daily goal |
+| Activity Recognition (Auto) | IMU + Puck 1 | Walking, running, cycling, swimming, strength |
+| Calorie Burn | IMU + Puck 1 | Active + resting calories, HR-based |
+| Heart Rate Zones | Puck 1 | 5 zones, personalized by max HR or HRR |
+| VO2max Estimate | Puck 1 + IMU | From submaximal HR response during activity |
+| Workout Summary | All | Duration, HR, zones, calories, strain per workout |
+| Weekly Activity Trend | Algo | Minutes in zones, training volume over time |
+
+### Temperature & Body
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Skin Temperature (±0.1°C) | Puck 2 TMP117 | Continuous, NIST-traceable, medical-grade |
+| Temperature Baseline | Algo | Personal average, deviation detection |
+| Fever Early Warning | Algo | Alert at +0.3°C above baseline |
+| Circadian Rhythm | Algo | Temp dip in deep sleep as sleep quality marker |
+| Cycle Tracking (Basal Temp) | Puck 2 | Ovulation detection via temperature rise |
+| Body Composition | Puck 3 AD5933 | Bioimpedance: fat percentage, muscle mass, hydration |
+
+### Stress & Mental Health
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| EDA Stress Level (Real-Time) | Puck 2 ADS1115 | Galvanic Skin Response, sympathetic nervous system |
+| Stress Score (0–100) | Puck 2 + Puck 1 | Combined: EDA + HRV + HR for holistic score |
+| Stress Timeline | Algo | When was stress high, when low throughout the day |
+| Breathing / Meditation Guide | Puck 1 + Puck 2 | Guided breathing with real-time HRV and EDA feedback |
+| Stress Resilience Score | Algo | Long-term trend: how fast your body recovers from stress |
+
+### Health & Longevity
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Biological Age | Algo | From 12+ metrics: HRV, VO2max, sleep, resting HR, temp, body comp |
+| Cardiovascular Age | Puck 1 | Heart-specific age from ECG + HRV + resting HR + vascular stiffness |
+| Health Report (PDF) | All | Exportable report for your doctor, customizable time range |
+| Illness Early Warning | Algo | Combined: temp + HRV + resting HR deviations |
+| Sleep Diary | Algo | Caffeine, alcohol, meals — correlation with sleep quality |
+
+### Women's Health
+
+| Feature | Sensor | Description |
+|---------|--------|-------------|
+| Menstrual Cycle Phases | Puck 2 + Algo | Follicular, Ovulatory, Luteal, Menstruation |
+| Ovulation Estimate | Puck 2 | Basal temperature rise as marker |
+| Cycle Influence on Metrics | Algo | How cycle phases affect recovery, sleep, stress |
+| Pregnancy Insights | Algo | Adjusted metrics and recommendations |
+
+---
+
+## Onboarding: Profile → Module Selection
+
+On first launch, the user chooses their goal. The app automatically activates the right modules. No user configures modules manually.
+
+| Profile | Activated Modules |
+|---------|-------------------|
+| **Fitness & Sport** | HR, HRV, HR Zones, Steps, Activity Recognition, Calories, Strain Score, Recovery Score, Training Rec, VO2max, Sleep Phases, Sleep Score, Sleep Need, Optimal Bedtime |
+| **Health & Sleep** | Resting HR Trend, HRV Trend, SpO2, Sleep Phases, Sleep Score, Sleep Consistency, Sleep Disturbances, Temp Baseline, Fever Warning, Illness Warning, Health Report, Bio Age |
+| **Stress Management** | EDA Stress, Stress Score, Stress Timeline, Breathing Guide, Stress Resilience, HRV, Sleep Score, Recovery Score, Sleep Diary |
+| **Weight Management** | Body Composition, Calories, Activity Goal, Sleep Score, Stress Score, Weekly Activity Trend, Recovery Score |
+| **Women's Health** | Cycle Phases, Ovulation Estimate, Cycle Influence, Temp Baseline, Sleep Score, Stress Score, Recovery Score |
+
+Every profile can be changed at any time. Modules are added/removed instantly. Previously collected sensor data is preserved.
+
+---
+
+## Technical Architecture
+
+### Layer 1: Firmware (XIAO nRF52840)
+
+Reads sensors, streams raw data over BLE. Knows nothing about modules, profiles, or features. Pure data proxy.
+
+- Custom BLE GATT Service with one characteristic per sensor
+- Sampling: PPG 100 Hz, ECG 200 Hz, Temperature 1 Hz, EDA 10 Hz, IMU 50 Hz
+
+### Layer 2: App — Data Layer
+
+Receives BLE raw data, stores locally in SQLite/Realm. No cloud. All data on device.
+
+- Schema: timestamp + sensor_id + raw_data
+- API for modules: time ranges, aggregations, streaming
+
+### Layer 3: App — Module Engine
+
+Loads modules based on user profile and detected sensors. Each module implements:
+
+```
+requiredSensors() → which pucks are needed
+process(data)     → algorithm computation
+output()          → card data for dashboard
+```
+
+Modules run locally, isolated, can be activated/deactivated at runtime.
+
+### Layer 4: App — Presentation Layer
+
+Dashboard with cards. Each card is the visualization of a module's output.
+
+- **Order**: Most important on top, time-dependent (morning: Sleep Score, midday: Stress, evening: Training Rec)
+- **"For You"**: Curated community modules based on profile
+- **Developer Mode**: Raw data viewer, API docs, module upload
+
+### Layer 5: Developer SDK & Algorithm Hub
+
+- SDK in JavaScript/Python
+- Access to all sensor data via documented API
+- Module template with `requiredSensors()`, `process()`, `output()`
+- Publication via GitHub PR to the OpenPulse Algorithm Hub
+- Three trust levels:
+
+| Level | Visibility | How to reach |
+|-------|------------|-------------|
+| **Verified** | Pre-installed | Core team reviewed + tested |
+| **Community-Reviewed** | "For You" section | Community review + automated tests |
+| **Experimental** | Developer mode only | Any published module |
 
 ---
 
@@ -72,7 +274,7 @@ Openpulse/
 
 ---
 
-## Quick Start
+## Quick Start (Dev Prototype)
 
 ### 1. Flash Firmware
 
@@ -94,7 +296,7 @@ Openpulse/
 
 ---
 
-## Current Features (v5)
+## Current Features (v5 Dev Prototype)
 
 ### Firmware
 - **Real SpO2** — AC/DC ratio algorithm using Red/IR channels (R-value → `SpO2 = 104 - 17·R`)
@@ -134,177 +336,6 @@ The Seeed Arduino LSM6DS3 library has a compilation error on mbed-based nRF52840
 
 ---
 
-## Algorithm Catalog — 72 Algorithms
-
-The full OpenPulse algorithm set, designed for the next-generation multi-puck hardware. **23 are cross-sensor fusion features** that are only possible because of OpenPulse's unique sensor combination.
-
-### Puck 1: Heart Algorithms (PPG + ECG via MAX86150)
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| A01 | Heart Rate (Real-Time) | PPG | Peak detection, moving average, outlier filtering |
-| A02 | Heart Rate Variability (HRV) | PPG/ECG | R-R intervals → RMSSD, SDNN, pNN50, LF/HF ratio |
-| A03 | Blood Oxygen (SpO2) | PPG Red+IR | Beer-Lambert law, calibration curve |
-| A04 | Respiratory Rate | PPG modulation | Respiratory sinus arrhythmia, bandpass 0.1–0.5 Hz |
-| A05 | ECG Rhythm Check | ECG | On-demand QRS detection, irregularity detection, PDF export |
-| A06 | Resting HR Trend | PPG (night) | Lowest 5-min average during sleep over 7/30/90 days |
-| A07 | PPG Waveform Analysis | PPG raw | Augmentation index, dicrotic notch, SDPPG vascular index |
-| A08 | Vascular Age | PPG raw | SDPPG a/b-ratio → arterial stiffness vs. age norms |
-| A09 | Perfusion Index (PI) | PPG amplitude | Pulsatile vs. non-pulsatile signal ratio |
-
-### Cross-Sensor: PPG × ECG (Puck 1 Internal)
-
-These algorithms exploit the **synchronized PPG+ECG** capture of the MAX86150 — the feature that separates OpenPulse from every competitor.
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| X01 | Blood Pressure (PTT) | ECG R-peak + PPG foot | Pulse Transit Time → SBP/DBP estimation. RMSE ~3–5 mmHg after calibration |
-| X02 | Arterial Stiffness (PWV) | ECG + PPG sync | Pulse Wave Velocity from PTT + estimated path length |
-| X03 | Pre-Ejection Period (PEP) | ECG Q-onset + PPG | Cardiac contractility and sympathetic activation marker |
-| X04 | Cardiac Output Estimate | ECG + PPG morphology | HR × stroke volume estimate (PPG amplitude + PEP) |
-| X05 | Autonomic Balance (SNS/PNS) | ECG HRV + PPG PTT | LF/HF ratio + PEP + PTT variability → sympathetic vs. parasympathetic |
-
-### Puck 2: Temperature + Stress Algorithms
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| A10 | Skin Temperature Baseline | TMP117 | Personal 14-day average, deviations >0.3°C flagged |
-| A11 | Fever Early Warning | TMP117 trend | Rising temp deviation + resting HR rise + HRV drop |
-| A12 | Circadian Rhythm Score | TMP117 24h | Amplitude/timing of nighttime temperature dip |
-| A13 | Ovulation Detection | TMP117 basal | 0.2–0.5°C post-ovulation rise, held 10+ days. ±0.1°C precision |
-| A14 | EDA Stress Level (Real-Time) | ADS1115 | Tonic EDA baseline + phasic EDA peaks |
-| A15 | EDA Stress Timeline | ADS1115 + time | Daily stress pattern recognition |
-| A16 | Relaxation Biofeedback | ADS1115 live | Real-time EDA during breathing/meditation exercises |
-| A17 | Sleep EDA Patterns | ADS1115 (night) | EDA storms correlate with emotional processing and deep sleep |
-
-### Cross-Sensor: Heart × Temperature × Stress
-
-**No competitor** has PPG+ECG+EDA+precision temperature simultaneously.
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| X06 | Stress vs. Exercise | EDA + HR + IMU | High HR + high EDA + no motion = mental stress. High HR + low EDA + motion = physical exertion. **No other tracker can distinguish these.** |
-| X07 | Multi-Signal Illness Warning | Temp + HRV + resting HR + EDA | Four signals combined detect illness up to 48h before symptoms |
-| X08 | Autonomic Nervous System Mapping | ECG HRV + EDA + Temp | Three independent windows into the ANS: parasympathetic, sympathetic, thermoregulatory |
-| X09 | Recovery Score (Multi-Signal) | All Puck 1+2 + IMU | Night HRV (40%) + resting HR trend (15%) + sleep quality (20%) + temp rhythm (10%) + morning EDA (15%) |
-| X10 | Strain Score (Multi-Signal) | HR + EDA + IMU + Temp | Physical + mental + thermoregulatory load — 3 dimensions vs. 1 |
-| X11 | Sleep Phases (5-Signal) | IMU + HR + HRV + Temp + EDA | Most accurate consumer sleep staging: movement + HR dip + HRV patterns + temp dip + EDA storms |
-| X12 | Biological Age | All sensors | 12+ biomarkers: vascular age, resting HR, HRV, PTT-BP, sleep, VO2max, stress resilience, temp rhythm, EDA, body composition |
-| X13 | Chronotype Detection | Temp 24h + HRV 24h + IMU | Circadian rhythm timing → lark/owl/normal classification |
-| X14 | Stress Resilience Score | EDA + HRV recovery speed | How fast EDA and HRV normalize after stress. Long-term trend |
-
-### Puck 3: Bioimpedance + Cross-Sensor
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| A18 | Body Fat Percentage | AD5933 | Bioimpedance at 50 kHz + height/weight → total body water → fat-free mass |
-| A19 | Muscle Mass Estimate | AD5933 | Fat-free mass proxy, trend over weeks |
-| A20 | Hydration Level | AD5933 | Total body water trend, dehydration detection |
-| X15 | Hydration + Temperature | AD5933 + TMP117 | Falling impedance + rising temp = dehydration warning |
-| X16 | Body Composition + Activity | AD5933 + IMU + HR | Correlates body comp changes with training volume |
-
-### XIAO Internal: IMU + Microphone
-
-| ID | Feature | Input | Description |
-|----|---------|-------|-------------|
-| A21 | Step Counter | IMU Accel | Peak detection, bandpass 0.5–3 Hz, adaptive threshold |
-| A22 | Activity Recognition | IMU 6-axis | Classification: standing, walking, running, cycling, lying |
-| A23 | Sleep Detection | IMU + HR | Low movement + falling HR + lying position |
-| A24 | Calorie Burn | IMU + HR | Activity minutes × HR-based energy expenditure |
-| A25 | Snoring Detection | PDM Mic | Audio envelope analysis, 100–800 Hz frequency analysis |
-| A26 | Workout Detection + HR Zones | IMU + Puck 1 | Auto start/stop, live HR zones, summary |
-| A27 | Running Cadence | IMU Accel | Steps/minute during running (optimal: 170–180 spm) |
-| X17 | Sleep Apnea Screening | Mic + SpO2 + HR | Snoring patterns + SpO2 drops + HR spikes = apnea event counting |
-
-### Composite Algorithms (Highest Level)
-
-These are systems of multiple algorithms working together — the reason a user opens the app.
-
-| ID | Feature | Base Algorithms | Description |
-|----|---------|-----------------|-------------|
-| C01 | Recovery Score (0–100) | A02+A06+A10+A12+A14+A23 → X09 | 6 signal sources vs. 3 at Whoop |
-| C02 | Strain Score (0–21) | A01+A14+A22+A24 → X10 | 3 dimensions vs. 1 at Whoop |
-| C03 | Sleep Score (0–100) | A23+A02+A04+A12+A17 → X11 | 5-signal sleep phases |
-| C04 | Biological Age | A07+A08+A02+A06+X01+A12+A14+A18 → X12 | 12+ biomarkers |
-| C05 | Cardiovascular Age | A07+A08+X01+X02+X03+A06 | 6 cardiac metrics — no competitor has all |
-| C06 | Training Recommendation | C01+C02+A22 | Full send / Normal / Light / Rest |
-| C07 | Sleep Recommendation | C03+C02+A12 | Optimal bedtime + duration target |
-| C08 | Health Report (PDF) | All C-scores + trends | Exportable 2-week/monthly report for doctors |
-| C09 | Women's Health | A13+A12+C01+C03+A14 | Cycle phases + impact on recovery, sleep, stress |
-| C10 | Personalized Insights | All + user profile | Context-aware: morning recovery, midday stress, evening sleep |
-
----
-
-## Algorithm Factory — Development Strategy
-
-Building 72 algorithms requires a systematic, repeatable process. Here's the architecture.
-
-### Spec-First Development
-
-Every algorithm is defined in a structured **spec file** before any code is written:
-
-```
-algorithms/A01_heart_rate/
-├── spec.md          ← Contract: what to build
-├── references.md    ← Literature, formulas, validation data
-├── firmware.cpp     ← Generated implementation
-├── firmware.h       ← Generated header
-└── test_vectors.h   ← Known-good input→output pairs
-```
-
-The spec template forces decisions on: sensor input, sample rate, algorithm method, output format, edge cases, medical references, and test vectors — **before** any code is generated.
-
-### Dependency Graph & Build Order
-
-Algorithms must be built bottom-up in 4 phases:
-
-| Phase | What | Count | Prerequisite |
-|-------|------|-------|-------------|
-| **P0: Drivers** | Raw sensor I2C/SPI read + ring buffers | 6 | Hardware on hand |
-| **P1: Base** | Single-sensor algorithms (A01–A27) | 27 | Drivers working |
-| **P2: Cross-Sensor** | Multi-sensor fusion (X01–X17) | 17 | Base algorithms stable |
-| **P3: Composite** | Score systems (C01–C10) | 10 | Cross-sensor validated |
-
-### Firmware Architecture: How 72 Algorithms Fit on nRF52840
-
-The nRF52840 has 256KB RAM — not enough for 72 algorithms simultaneously. Solution: **tiered scheduling**.
-
-| Tier | Execution | Examples | RAM |
-|------|-----------|----------|-----|
-| **Tier 0: Always On** | Every loop iteration | HR, SpO2, Steps | ~2 KB |
-| **Tier 1: Periodic** | Round-robin, 1–5 Hz | HRV, Resp, Temp, EDA, PTT | ~4 KB |
-| **Tier 2: On-Demand** | User triggered | ECG Check, Body Fat, Vascular Age | ~8 KB (alloc/free) |
-| **Tier 3: Off-Device** | Phone/Dashboard | Composite scores, PDF reports, Bio Age | 0 KB |
-
-### Cross-Sensor Timing
-
-Sensors run at different rates (PPG@100Hz, EDA@10Hz, Temp@1Hz). Solution: **timestamped ring buffers** with interpolation.
-
-```cpp
-struct SensorSample {
-    uint32_t timestamp_ms;
-    float    value;
-};
-```
-
-Cross-sensor algorithms interpolate to align data from different sample rates.
-
-### Medical Validation Checklist
-
-Every algorithm must pass:
-
-| Check | Description |
-|-------|-------------|
-| Range clamping | Output never exceeds physiological limits |
-| No-data handling | Explicit 0 / NaN / "--" when signal absent |
-| Motion rejection | IMU gates PPG/ECG during movement |
-| Literature reference | Every formula traced to a published paper |
-| Disclaimer | "Not a medical device" on all user-facing output |
-| Unit tests | At least 3 test vectors: normal, edge, failure |
-| Saturation handling | Graceful behavior on ADC-clipped signals |
-
----
-
 ## Algorithm Builder Skill
 
 The `.agents/skills/openpulse_algorithm/` directory contains an AI skill that automates algorithm development while enforcing quality standards.
@@ -317,142 +348,107 @@ You write a **spec file** (structured markdown describing the algorithm). The sk
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | 10-section master rulebook: medical correctness, privacy, firmware engineering, signal processing, code generation procedure, review checklist |
+| `SKILL.md` | 10-section master rulebook: medical correctness, privacy, firmware engineering, signal processing, code generation, review checklist |
 | `templates/spec_template.md` | Blank algorithm spec — fill in to define any new algorithm |
-| `examples/A01_heart_rate_spec.md` | Complete reference spec with full detail level (adaptive peak detection, SQI computation, 7 test vectors) |
-| `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, `AlgoState` enum (IDLE→ACQUIRING→VALID→LOW_QUALITY), `AlgoTier`, base class interface |
-| `resources/SensorDriverBase.h` | Typed sensor driver interfaces: `PPGECGDriver`, `TempDriver`, `EDADriver`, `BioimpedanceDriver`, `IMUDriver`, `MicDriver` — algorithms consume drivers via this API, enabling mock testing and sensor swaps |
-| `resources/algorithm_registry.md` | Master tracker for all 72 algorithms — status, links to specs, progress summary |
+| `examples/A01_heart_rate_spec.md` | Complete reference spec (adaptive peak detection, SQI computation, 7 test vectors) |
+| `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, `AlgoState`, `AlgoTier`, base class |
+| `resources/RingBuffer.h` | Timestamped circular buffer with stats + cross-sensor interpolation |
+| `resources/SensorDriverBase.h` | Typed driver interfaces: `PPGECGDriver`, `TempDriver`, `EDADriver`, `BioimpedanceDriver`, `IMUDriver`, `MicDriver` |
+| `resources/algorithm_registry.md` | Master tracker for all 72 algorithms — status, specs, progress |
 
 ### Key Rules Enforced
 
 **Medical Correctness**
-- Every formula must cite a peer-reviewed paper or manufacturer app note
+- Every formula cites a peer-reviewed paper or manufacturer app note
 - All outputs clamped to physiological ranges (HR: 30–220, SpO2: 70–100, etc.)
-- Signal Quality Index (SQI) on every output — below 0.4 = output suppressed
-- Confidence intervals for calibration-dependent metrics (blood pressure, SpO2)
-- Regulatory classification: Wellness / Health Indicator / Health Screening
+- Signal Quality Index (SQI, 0.0–1.0) on every output — below 0.4 = suppressed
 - Health Screening algorithms require "not a medical device" disclaimer
 
 **Privacy**
-- All processing on-device (nRF52840 or browser) — no cloud, no servers
+- All processing on-device — no cloud, no servers, no internet dependency
 - No PII in BLE payloads — only computed float values
-- No internet dependency for any algorithm
-- User data in localStorage only, deletable via single button
+- User data in localStorage/SQLite only, deletable via single button
 
 **Firmware Safety (nRF52840: 256KB RAM)**
 - No `malloc`/`new` in loop — all buffers statically allocated
-- No `delay()` in algorithms — state machines only
-- No `double` — `float` only (Cortex-M4)
-- No blocking calls > 1ms
+- No `delay()` — state machines only
 - Motion artifact rejection for all PPG/ECG algorithms
-- 5+ test vectors per algorithm: normal, boundary, no-signal, artifact, recovery
+- 5+ test vectors per algorithm
 
-### How to Use the Skill
+### How to Use
 
-**Step 1: Create a spec for your algorithm**
 ```bash
-# Copy the template
+# 1. Copy spec template
 cp .agents/skills/openpulse_algorithm/templates/spec_template.md \
    algorithms/A03_spo2/spec.md
+
+# 2. Fill in every field (see examples/A01_heart_rate_spec.md for reference)
+
+# 3. Tell AI: "Using the openpulse_algorithm_builder skill,
+#    implement algorithm A03 from its spec"
+
+# 4. Update algorithm_registry.md with new status
+
+# 5. Flash, test, validate
 ```
-
-**Step 2: Fill in every field**
-
-Use `examples/A01_heart_rate_spec.md` as a reference for the level of detail expected. Key sections:
-- **Sensor Input**: exact chip, channel, sample rate, buffer size
-- **Algorithm**: step-by-step method with citations for every formula
-- **Parameters**: named constants with values, units, and sources
-- **SQI Computation**: how to assess signal quality for this specific algorithm
-- **Edge Cases**: table of failure modes and behaviors
-- **Test Vectors**: 5+ scenarios with expected outputs and tolerances
-
-**Step 3: Invoke the skill**
-
-In your AI coding assistant, reference the skill:
-
-> "Using the openpulse_algorithm_builder skill, implement algorithm A03 from its spec at `algorithms/A03_spo2/spec.md`"
-
-The skill will:
-1. Read the spec completely
-2. Read all dependency specs
-3. Read the sensor driver header
-4. Generate `firmware.h` and `firmware.cpp` following the `AlgorithmBase` pattern
-5. Generate `test_vectors.h` from the spec’s test vector table
-6. Verify against the 13-point review checklist (§10 of SKILL.md)
-
-**Step 4: Update the registry**
-
-Mark the algorithm’s status in `resources/algorithm_registry.md`:
-```
-| A03 | SpO2 | PPG Red+IR | 0 | ● implemented | [spec](../algorithms/A03_spo2/spec.md) | ✓ | — |
-```
-
-**Step 5: Validate**
-- Flash firmware, check Serial output
-- Run test vectors
-- Verify on dashboard
 
 ---
 
-## What No Competitor Can Do
+## Implementation Roadmap
 
-| Feature | OpenPulse | Others |
-|---------|-----------|--------|
-| Blood Pressure via PTT (sync PPG+ECG) | ✅ Exclusive | Impossible |
-| True Stress vs. Physical Exertion (EDA+HR+IMU) | ✅ Exclusive | Impossible |
-| Multi-Signal Illness Warning (4 signals) | ✅ Exclusive | 1–2 signals |
-| 5-Signal Sleep Phases | ✅ Exclusive | 2–3 signals max |
-| ANS Mapping (ECG+EDA+Temp) | ✅ Exclusive | No consumer device |
-| Cardiovascular Age from 6 heart metrics | ✅ Exclusive | Incomplete inputs |
-| Sleep Apnea Screening (Mic+SpO2+HR) | ✅ Exclusive | Missing signals |
-| Hydration Warning (Bioimpedance+Temp) | ✅ Exclusive | No one has both |
-| Biological Age from 12+ biomarkers | ✅ 12+ | Whoop: 9, Oura: ~5 |
-| 3D Strain Score (physical+mental+thermo) | ✅ 3 dimensions | Physical only |
+### Phase 1: MVP — Now → Q2 2026
 
----
+BLE dashboard, raw data streaming, basic metrics live on screen.
 
-## Roadmap & Next Steps
+| Task | Status |
+|------|--------|
+| BLE firmware (sensor read + stream) | ✅ Done (v5) |
+| Web Dashboard (9 sensor cards) | ✅ Done |
+| Real SpO2 + stable HR algorithms | ✅ Done |
+| IMU + PDM microphone integration | ✅ Done |
+| Algorithm Builder Skill | ✅ Done |
+| Write driver specs for new sensors (MAX86150, TMP117, ADS1115, AD5933) | Pending |
+| Implement + validate all drivers | Pending |
+| Write specs for P0 base algorithms (HR, SpO2, Steps, EDA, Temp) | Pending |
+| Implement P0 base algorithms | Pending |
 
-### Phase 0: Sensor Drivers (Current)
-Get raw data from every sensor reliably before touching algorithms.
+### Phase 2: Base App — Q3 2026
 
-| Step | Task | Status |
-|------|------|--------|
-| 0.1 | Write driver spec for MAX86150 (PPG+ECG) | Pending |
-| 0.2 | Write driver spec for TMP117 (precision temp) | Pending |
-| 0.3 | Write driver spec for ADS1115 (EDA) | Pending |
-| 0.4 | Write driver spec for AD5933 (bioimpedance) | Pending |
-| 0.5 | Implement & validate all drivers with Serial output | Pending |
-| 0.6 | Build multi-puck I2C bus architecture | Pending |
+React Native or Flutter app. Onboarding with profile selection. Automatic sensor detection.
 
-### Phase 1: Base Algorithms
-Single-sensor algorithms — the building blocks.
+| Task | Status |
+|------|--------|
+| Mobile app scaffold (React Native / Flutter) | Pending |
+| Onboarding flow with 5 profiles | Pending |
+| Auto sensor detection via BLE scan | Pending |
+| Module engine (`requiredSensors`, `process`, `output`) | Pending |
+| Local data storage (SQLite/Realm) | Pending |
+| 15–20 verified modules integrated | Pending |
+| Dashboard with time-dependent card ordering | Pending |
+| PDF + CSV export | Pending |
 
-| Priority | Algorithms | Why First |
-|----------|------------|----------|
-| P0 (MVP) | A01 HR, A03 SpO2, A09 PI, A21 Steps | Core vitals + activity |
-| P0 (MVP) | A14 EDA Stress, A10 Temp Baseline | Unique selling point |
-| P1 | A02 HRV, A04 Resp Rate, A05 ECG | Medical features |
-| P2 | A07 Waveform, A08 Vascular Age | Advanced PPG analysis |
+### Phase 3: Algorithm SDK — Q4 2026
 
-### Phase 2: Cross-Sensor Fusion
-The features no competitor can offer.
+Module interface specified and documented. SDK for community developers.
 
-| Priority | Algorithms | Impact |
-|----------|------------|--------|
-| P0 | X01 Blood Pressure, X06 Stress vs. Exercise | Headline features |
-| P1 | X07 Illness Warning, X11 Sleep Phases | Key differentiators |
-| P2 | X12 Biological Age, X17 Apnea Screening | Premium features |
+| Task | Status |
+|------|--------|
+| Module interface specification | Pending |
+| JavaScript SDK with documented API | Pending |
+| 3 reference open-source modules (advanced sleep, running pace, sport plugin) | Pending |
+| Developer mode in app (raw data viewer, API docs, module upload) | Pending |
+| Module validation + automated testing pipeline | Pending |
 
-### Phase 3: Composite Scores
-User-facing scores that combine everything.
+### Phase 4: Algorithm Hub — 2027
 
-| Priority | Algorithms | Target |
-|----------|------------|--------|
-| P0 | C01 Recovery, C02 Strain, C03 Sleep | Core app experience |
-| P1 | C04 Bio Age, C06 Training Rec, C09 Women's Health | Differentiation |
-| P2 | C08 Health Report PDF, C10 Personalized Insights | Premium |
+GitHub repository for community algorithms. Review process for trust level progression.
+
+| Task | Status |
+|------|--------|
+| Algorithm Hub GitHub repository | Pending |
+| Review process: Experimental → Community-Reviewed → Verified | Pending |
+| "For You" curation in app based on profile | Pending |
+| Research mode with group dashboard and real-time streaming | Pending |
 
 ---
 
@@ -482,12 +478,14 @@ User-facing scores that combine everything.
 ## Tech Stack
 
 - **Firmware:** Arduino C++ (ArduinoBLE, I2C, PDM)
-- **Dashboard:** Vanilla HTML/CSS/JS (no frameworks, no build step)
-- **Communication:** Bluetooth Low Energy (GATT, 9 characteristics)
-- **Visualization:** Canvas API sparklines
+- **Dashboard (Dev):** Vanilla HTML/CSS/JS (no frameworks, no build step)
+- **App (Production):** React Native or Flutter
+- **Database:** SQLite / Realm (local only, no cloud)
+- **Communication:** Bluetooth Low Energy (GATT)
 - **Algorithm Dev:** AI skill with medical validation rules
+- **SDK:** JavaScript / Python
 - **Target:** Seeed XIAO nRF52840 Sense
 
 ---
 
-*72 algorithms. 23 exclusive. No subscription. Your data. Open source.*
+*Three slots. Six sensors. 51+ modules. Your configuration. No subscription. Your data. Open source.*

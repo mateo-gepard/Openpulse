@@ -48,14 +48,23 @@ The platform consists of:
 
 ```
 Openpulse/
+├── .agents/skills/openpulse_algorithm/   # AI Algorithm Builder Skill
+│   ├── SKILL.md                          # Master rules (medical, privacy, firmware)
+│   ├── templates/
+│   │   └── spec_template.md              # Blank algorithm spec template
+│   ├── examples/
+│   │   └── A01_heart_rate_spec.md        # Reference spec (shows expected detail)
+│   └── resources/
+│       ├── AlgorithmBase.h               # Shared types, state machine, base class
+│       └── RingBuffer.h                  # Timestamped circular buffer + stats
 ├── firmware/
-│   ├── sensor_dashboard.ino    # Main firmware (BLE + sensors + algorithms)
+│   ├── sensor_dashboard.ino              # Main firmware (BLE + sensors + algorithms)
 │   └── imu_test/
-│       └── imu_test.ino        # Standalone IMU diagnostic sketch
+│       └── imu_test.ino                  # Standalone IMU diagnostic sketch
 ├── dashboard/
-│   ├── index.html              # Dashboard UI (9 sensor cards)
-│   ├── style.css               # Styling (light/dark theme)
-│   └── app.js                  # Web Bluetooth + data visualization
+│   ├── index.html                        # Dashboard UI (9 sensor cards)
+│   ├── style.css                         # Styling (light/dark theme)
+│   └── app.js                            # Web Bluetooth + data visualization
 └── README.md
 ```
 
@@ -294,6 +303,60 @@ Every algorithm must pass:
 
 ---
 
+## Algorithm Builder Skill
+
+The `.agents/skills/openpulse_algorithm/` directory contains an AI skill that automates algorithm development while enforcing quality standards.
+
+### What It Does
+
+You write a **spec file** (structured markdown describing the algorithm). The skill reads the spec and generates medically-correct firmware code following strict rules.
+
+### Skill Components
+
+| File | Purpose |
+|------|---------|
+| `SKILL.md` | 10-section master rulebook: medical correctness, privacy, firmware engineering, signal processing, code generation procedure, review checklist |
+| `templates/spec_template.md` | Blank algorithm spec — fill in to define any new algorithm |
+| `examples/A01_heart_rate_spec.md` | Complete reference spec with full detail level (adaptive peak detection, SQI computation, 7 test vectors) |
+| `resources/AlgorithmBase.h` | Shared C++ types: `AlgorithmOutput`, `CalibratedOutput`, `AlgoState` enum (IDLE→ACQUIRING→VALID→LOW_QUALITY), `AlgoTier`, base class interface |
+| `resources/RingBuffer.h` | Timestamped circular buffer with `mean()`, `median()`, `stddev()`, `rms()`, `min()`, `max()`, and `interpolateAt()` for cross-sensor alignment |
+
+### Key Rules Enforced
+
+**Medical Correctness**
+- Every formula must cite a peer-reviewed paper or manufacturer app note
+- All outputs clamped to physiological ranges (HR: 30–220, SpO2: 70–100, etc.)
+- Signal Quality Index (SQI) on every output — below 0.4 = output suppressed
+- Confidence intervals for calibration-dependent metrics (blood pressure, SpO2)
+- Regulatory classification: Wellness / Health Indicator / Health Screening
+- Health Screening algorithms require "not a medical device" disclaimer
+
+**Privacy**
+- All processing on-device (nRF52840 or browser) — no cloud, no servers
+- No PII in BLE payloads — only computed float values
+- No internet dependency for any algorithm
+- User data in localStorage only, deletable via single button
+
+**Firmware Safety (nRF52840: 256KB RAM)**
+- No `malloc`/`new` in loop — all buffers statically allocated
+- No `delay()` in algorithms — state machines only
+- No `double` — `float` only (Cortex-M4)
+- No blocking calls > 1ms
+- Motion artifact rejection for all PPG/ECG algorithms
+- 5+ test vectors per algorithm: normal, boundary, no-signal, artifact, recovery
+
+### Workflow
+
+```
+1. Copy spec_template.md → algorithms/<ID>_<name>/spec.md
+2. Fill in every field (sensor, method, parameters, edge cases, references)
+3. Invoke the skill — it reads the spec and generates firmware.h + firmware.cpp
+4. Run against test vectors
+5. Review with the 13-point checklist in SKILL.md §10
+```
+
+---
+
 ## What No Competitor Can Do
 
 | Feature | OpenPulse | Others |
@@ -311,12 +374,36 @@ Every algorithm must pass:
 
 ---
 
+## Changelog
+
+### v5 (March 2026)
+- **IMU Power Fix**: explicit pin 15 management with nRF52840 high-drive GPIO register config, retry with full power cycle on init failure
+- **PDM Microphone**: 16 kHz mono sampling via interrupt callback, RMS → dB sound level (`dB = 20·log10(rms/32767) + 120`), new BLE characteristic (UUID `...def9`)
+- **Sound Level Card**: new dashboard card with microphone icon, rose accent color, sparkline, min/max/avg stats
+- **4-Slot Round-Robin**: sensor cycle expanded to BME280 → MCP9808 → IMU → Mic
+- **Algorithm Builder Skill**: created `.agents/skills/openpulse_algorithm/` with SKILL.md, spec template, example spec, AlgorithmBase.h, RingBuffer.h
+
+### v4 (March 2026)
+- **Real SpO2**: replaced simulated values with AC/DC ratio algorithm (Red/IR R-value → `SpO2 = 104 - 17·R`, clamped 70–100%)
+- **Stable Heart Rate**: 8-beat rolling average (was 4), 300ms beat debounce, 2s gap detection, outlier rejection, requires 4 valid beats before reporting
+- **BLE Stability**: 5ms delays between characteristic writes, 750ms update interval (was 500ms), mid-write connection checks, connection watchdog with auto re-advertising
+- **Auto-Reconnect**: dashboard retries up to 3 times with 2s delay on BLE drop
+- **Resilient Polling**: individual characteristic read failures no longer crash the entire polling loop
+
+### v3 (March 2026)
+- Initial sensor dashboard with MAX30102, BME280, MCP9808, LSM6DS3TR-C
+- Web Bluetooth dashboard with 8 sensor cards
+- Light/dark theme, debug panel, sparkline charts
+
+---
+
 ## Tech Stack
 
 - **Firmware:** Arduino C++ (ArduinoBLE, I2C, PDM)
 - **Dashboard:** Vanilla HTML/CSS/JS (no frameworks, no build step)
 - **Communication:** Bluetooth Low Energy (GATT, 9 characteristics)
 - **Visualization:** Canvas API sparklines
+- **Algorithm Dev:** AI skill with medical validation rules
 - **Target:** Seeed XIAO nRF52840 Sense
 
 ---

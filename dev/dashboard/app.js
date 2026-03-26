@@ -540,8 +540,20 @@ function renderAlgoList() {
         <span class="algo-item-name">${algo.name}</span>
         ${isCustom ? '<span class="algo-item-custom-badge">USR</span>' : ''}
         <span class="algo-item-tier t${algo.tier}">T${algo.tier}</span>
+        ${isCustom ? '<button class="algo-item-delete" title="Remove algorithm">×</button>' : ''}
       </div>
       ${chPillsHtml}`;
+
+    // Delete button for custom algos
+    if (isCustom) {
+      const delBtn = el.querySelector('.algo-item-delete');
+      if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          removeCustomAlgo(algo.id);
+        });
+      }
+    }
 
     // Only allow click if not connected, or channels are fully met
     if (!isConnected || allMet || channels.length === 0) {
@@ -678,6 +690,9 @@ function onCharChanged(key, dataView) {
       sd.sampleCount++;
       sd.online = true;
     });
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    sensorData[key].history.push(mag);
+    if (sensorData[key].history.length > HISTORY_MAX) sensorData[key].history.shift();
     sensorData[key].lastUpdate = now;
     sensorData[key].online = true;
     sensorData[key].sampleCount++;
@@ -1400,13 +1415,29 @@ function updateAlgoPanelsWithSensor(sensorKey) {
     if (p.algo.displayModule && typeof p.algo.displayModule.update === 'function') {
       p.history.push(output);
       if (p.history.length > HISTORY_MAX) p.history.shift();
-      const state = {
-        output, sqi, history: p.history,
-        sensorData: Object.fromEntries(channels.map(ch => [ch, {
+      const sDataEntries = {};
+      channels.forEach(ch => {
+        sDataEntries[ch] = {
           latest: sensorData[ch]?.history?.slice(-1)[0] ?? 0,
           online: sensorData[ch]?.online ?? false,
           history: sensorData[ch]?.history ?? [],
-        }])),
+          sampleCount: sensorData[ch]?.sampleCount ?? 0,
+        };
+        const cd = CHANNEL_DEFS.find(c => c.key === ch);
+        if (cd?.type === 'vec3') {
+          ['X','Y','Z'].forEach(axis => {
+            sDataEntries[ch + axis] = {
+              latest: sensorData[ch+axis]?.history?.slice(-1)[0] ?? 0,
+              online: sensorData[ch+axis]?.online ?? false,
+              history: sensorData[ch+axis]?.history ?? [],
+              sampleCount: sensorData[ch+axis]?.sampleCount ?? 0,
+            };
+          });
+        }
+      });
+      const state = {
+        output, sqi, history: p.history,
+        sensorData: sDataEntries,
         elapsed: p.startTime ? Date.now() - p.startTime : 0,
         params: p.paramValues || {},
         algo: { id: p.algo.id, name: p.algo.name, unit: p.algo.unit, range: p.algo.range },

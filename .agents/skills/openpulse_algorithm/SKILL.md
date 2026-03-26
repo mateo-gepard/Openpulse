@@ -664,14 +664,72 @@ For IMU-based motion algorithms, use these standardized feature extraction metho
 - Rotation integration from gyroscope (short windows only — drift accumulates)
 - Quaternion estimation for orientation-dependent algorithms
 
-### 7.2 Sport Algorithm Validation
+### 7.2 Signal Profile Characterization (MANDATORY)
+
+Before designing a detection algorithm, **characterize the target signal's waveform shape**. Do NOT assume clean single-peak threshold crossings. Real wrist-worn IMU signals are complex, multi-lobe, and noisy.
+
+For every sport/motion algorithm, document in the spec:
+
+1. **Signal envelope shape**: Is the target event a single peak, multi-peak, oscillating, sustained plateau, or impulse? Sketch the expected acceleration/gyro profile over time.
+   - Example — Tennis forehand: Multi-lobe (backswing peak → dip → forward swing peak → impact spike → follow-through oscillation). Total duration 400–800ms.
+   - Example — Walking step: Periodic dual-peak (heel strike + toe-off) per gait cycle. ~500ms per step.
+   - Example — Bicep curl: Smooth single peak per rep. ~2s per rep.
+
+2. **Peak count per event**: How many acceleration peaks does ONE real event produce? This determines whether threshold-crossing alone works or needs windowing.
+   - 1 peak → Simple threshold works
+   - 2–4 peaks → **Must use fixed-window capture** (no early exit on signal drop)
+   - Sustained → Use energy integration, not peak detection
+
+3. **Inter-event gap**: Minimum time between consecutive events. This sets the cooldown floor.
+
+4. **Axis behavior**: Which axes carry the discriminating signal? Does the primary axis change during the event? (e.g., tennis: sagittal plane rotation dominates, but axis depends on grip)
+
+**Rule: If the signal profile is multi-peak or oscillating, NEVER use early exit on signal drop.** Use a fixed-duration capture window that spans the full event, then classify from the captured peaks.
+
+### 7.3 Event Segmentation Strategy (MANDATORY)
+
+Event segmentation = reliably isolating ONE discrete movement event from a continuous noisy IMU stream. This is the hardest part of any sport algorithm. The skill requires choosing an explicit strategy:
+
+**Strategy A: Fixed-Window Capture (recommended for impulsive events)**
+```
+Trigger: accelMag > threshold
+→ Open fixed-duration window (e.g., 400ms)
+→ Collect ALL peaks during window (do NOT exit early on signal drop)
+→ At window end: classify from collected peaks
+→ Enter cooldown for min inter-event gap + follow-through duration
+```
+Use for: tennis strokes, punches, golf swings, jumps — any event with multi-peak acceleration.
+
+**Strategy B: Threshold Crossing with Hysteresis (for simple single-peak events)**
+```
+Trigger: signal > upper_threshold
+→ Event active until signal < lower_threshold (lower < upper)
+→ Record peak during the active window
+→ Enter cooldown
+```
+Use for: step counting, simple rep counting — clean single-peak events.
+
+**Strategy C: Energy Windowing (for sustained/periodic events)**
+```
+Compute sliding-window energy: E = Σ(a² + g²) over N samples
+→ Event when E > energy_threshold for minimum duration
+→ End when E < energy_threshold for minimum gap
+```
+Use for: activity recognition, workout detection — sustained patterns.
+
+**Anti-pattern: Threshold + Early Accel Drop** — Triggering on accel > threshold then ending when accel < threshold * K. This FAILS for multi-peak signals because the inter-peak dip terminates the detection prematurely, causing:
+- Over-counting (one real event → multiple false detections)
+- Wrong classification (short duration → misclassified)
+- Missed peaks (peak gyro/accel occurs after premature exit)
+
+### 7.4 Sport Algorithm Validation
 
 Sport algorithms MUST define:
 1. **Ground truth method**: How to verify the algorithm is correct (e.g., video analysis, manual counting, force plate)
 2. **Accuracy target**: Specific metric with tolerance (e.g., "Rep count within ±1 rep per set", "Cadence within ±3 SPM")
 3. **Test scenarios**: At minimum — normal execution, boundary speed/intensity, idle/no-motion, mixed/transitional movements
 
-### 7.3 Range Checking (instead of physiological clamping)
+### 7.5 Range Checking (instead of physiological clamping)
 
 Sport outputs don't have physiological limits like health metrics, but they DO have sensible ranges:
 
@@ -1141,6 +1199,38 @@ The dashboard is a generic execution engine. When a panel opens, it calls `rende
 - CSS variable access to the design system (colors, fonts, spacing)
 - Full DOM/Canvas/SVG API access
 
+### 12.1a Dashboard Data Pipeline Constraints (CRITICAL)
+
+**Before writing ANY display.js that processes raw sensor history, understand these runtime constraints:**
+
+1. **Rolling buffer**: `sensorData[ch].history` is a **bounded rolling array** with max length `HISTORY_MAX` (currently 60). Old samples are shifted off the front via `array.shift()`. You CANNOT use an ever-incrementing index into this array — it will exceed the array length after `HISTORY_MAX` samples and silently stop processing.
+
+2. **Sample tracking**: Use `sensorData[ch].sampleCount` (total samples ever received, monotonically increasing) to track which samples are new. Compute `newSamples = sampleCount - lastProcessed`, then read from `history[len - newSamples]` to `history[len - 1]`.
+
+3. **Update frequency**: `update()` is called once per BLE notification on any subscribed channel. For vec3 channels (accel, gyro), this means ~50 Hz from each channel. If the algo subscribes to both accel AND gyro, `update()` fires ~100 times/sec — but each call may have 0 new samples for the non-triggering channel.
+
+4. **Batch processing timing**: Within one `update()` call, `Date.now()` returns the same value for all loop iterations. If your algorithm needs per-sample timing (swing duration, cooldown), use **sample-count-based timing**: `durationMs = sampleCount * (1000 / sampleRate)`. Never use wall-clock for intra-batch timing.
+
+5. **Vec3 sub-channels**: For vec3 channels (`accel`, `gyro`), the dashboard provides:
+   - `sensorData.accel` — magnitude history (scalar)
+   - `sensorData.accelX`, `sensorData.accelY`, `sensorData.accelZ` — per-axis history
+   - Same for `gyro` → `gyroX`, `gyroY`, `gyroZ`
+   Each sub-channel has its own `.history`, `.sampleCount`, `.online`, `.latest`.
+
+6. **History alignment**: Per-axis sub-channel histories (accelX, accelY, accelZ) are appended simultaneously by `onCharChanged()`, so `accelX.history[i]`, `accelY.history[i]`, `accelZ.history[i]` always correspond to the same physical sample.
+
+**Mandatory pattern for display.js that processes raw samples:**
+```javascript
+// In update():
+const ch = state.sensorData?.accelX;
+if (!ch || ch.history.length === 0) return;
+const len = ch.history.length;
+let newSamples = Math.max(0, (ch.sampleCount || len) - this._totalProcessed);
+this._totalProcessed = ch.sampleCount || len;
+const startIdx = Math.max(0, len - newSamples);
+for (let i = startIdx; i < len; i++) { /* process ch.history[i] */ }
+```
+
 ### 12.2 Display Module Contract
 
 ```javascript
@@ -1212,13 +1302,18 @@ The `state` object passed to `render()` and `update()`:
 {
   output: 72.3,             // Primary value (clamped to algo.range)
   sqi: 0.85,                // Signal quality index (0.0–1.0)
-  history: [72, 73, ...],   // Output history array (max ~300 points)
+  history: [72, 73, ...],   // Output history array (max HISTORY_MAX=60 points)
   sensorData: {             // Raw sensor data per channel
     ppg: {
       latest: 0.54,         // Most recent sample
       online: true,          // Whether sensor is streaming
-      history: [0.51, ...], // Raw sample history
+      history: [0.51, ...], // Raw sample history (ROLLING BUFFER, max 60 items)
+      sampleCount: 1042,    // Total samples ever received (monotonically increasing)
     },
+    // For vec3 channels (accel, gyro), also includes per-axis sub-channels:
+    // accelX: { latest, online, history, sampleCount },
+    // accelY: { ... }, accelZ: { ... },
+    // gyroX: { ... }, gyroY: { ... }, gyroZ: { ... },
   },
   elapsed: 12345,           // Milliseconds since algo started
   params: {                 // Current parameter values

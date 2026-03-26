@@ -1,12 +1,13 @@
 // display.js for U01: Tennis Session Analytics
 // Dashboard visualization module — 2×2 panel
-// Court-style heatmap + session summary + stroke breakdown + speed timeline
+// Live stroke detection from raw IMU (accelX/Y/Z + gyroX/Y/Z)
+// Court heatmap + session summary + stroke breakdown + speed timeline
 
 export default {
   // ── Metadata ───────────────────────────────────────────────
   id: 'U01',
   name: 'Tennis Session',
-  version: 1,
+  version: 2,
 
   // ── Data Contract ──────────────────────────────────────────
   channels: ['accel', 'gyro'],
@@ -19,7 +20,7 @@ export default {
   // ── Parameters ─────────────────────────────────────────────
   params: [
     { name: 'Stroke Threshold', min: 2.0, max: 6.0, default: 3.0, step: 0.5, unit: 'g' },
-    { name: 'Cooldown', min: 200, max: 800, default: 400, step: 50, unit: 'ms' },
+    { name: 'Cooldown', min: 200, max: 1200, default: 600, step: 50, unit: 'ms' },
   ],
 
   // ── Stroke Colors ──────────────────────────────────────────
@@ -33,6 +34,14 @@ export default {
   _typeLabels: ['FH', 'BH', 'SV', 'VO', '??'],
   _typeNames: ['Forehand', 'Backhand', 'Serve', 'Volley', 'Unclassified'],
   _typeKeys: ['forehand', 'backhand', 'serve', 'volley', 'unclassified'],
+
+  // ── Detection constants (match firmware Algo_U01.cpp) ─────
+  _STROKE_THRESHOLD: 3.0,    // g — accel magnitude to trigger detection
+  _COOLDOWN_MS: 600,         // ms between strokes (covers follow-through)
+  _SWING_WINDOW_MS: 400,     // ms to collect peak values after trigger
+  _SERVE_VERTICAL_G: 2.5,    // accelY threshold for serve detection
+  _VOLLEY_MAX_DUR_MS: 150,   // strokes shorter than this → volley (only if window cut short)
+  _SPEED_SCALE: 0.42,        // km/h per °/s peak gyro magnitude
 
   // ── Scoped CSS ─────────────────────────────────────────────
   css: `
@@ -147,47 +156,53 @@ export default {
       height: 80px;
       border-radius: var(--radius);
     }
-    [data-algo-id="U01"] .u01-sqi-mini {
+    [data-algo-id="U01"] .u01-live-bar {
       display: flex;
       align-items: center;
-      gap: 4px;
-      margin-top: auto;
+      gap: 6px;
+      margin-top: 2px;
     }
-    [data-algo-id="U01"] .u01-sqi-dot {
+    [data-algo-id="U01"] .u01-live-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
       transition: background 0.3s ease;
     }
-    [data-algo-id="U01"] .u01-sqi-text {
+    [data-algo-id="U01"] .u01-live-text {
       font-family: var(--font-mono);
       font-size: 9px;
       color: var(--text-3);
     }
-    [data-algo-id="U01"] .u01-empty-state {
-      grid-column: 1 / -1;
-      grid-row: 1 / -1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      color: var(--text-3);
+    [data-algo-id="U01"] .u01-accel-bar {
+      flex: 1;
+      height: 4px;
+      background: var(--surface-1);
+      border-radius: 2px;
+      overflow: hidden;
     }
-    [data-algo-id="U01"] .u01-empty-icon {
-      font-size: 32px;
-      opacity: 0.4;
-    }
-    [data-algo-id="U01"] .u01-empty-text {
-      font-family: var(--font-sans);
-      font-size: 13px;
+    [data-algo-id="U01"] .u01-accel-fill {
+      height: 100%;
+      border-radius: 2px;
+      background: var(--accent);
+      transition: width 0.1s ease, background 0.15s ease;
+      width: 0%;
     }
   `,
 
   // ── Internal state ─────────────────────────────────────────
-  _strokes: [],       // Array of { type, speed, elapsed_ms }
+  _strokes: [],              // { type, speed, timestamp }
   _typeCounts: [0, 0, 0, 0, 0],
   _sessionStart: 0,
+  _totalProcessed: 0,         // total samples processed (tracks sampleCount)
+  _inSwing: false,             // state machine: currently in a swing?
+  _swingSamples: 0,            // samples elapsed since swing trigger
+  _swingPeakAccel: 0,          // peak accel magnitude during swing
+  _swingPeakGyro: 0,           // peak gyro magnitude during swing
+  _swingPeakGyroZ: 0,          // peak gyroZ (signed) — for FH/BH classification
+  _swingPeakAccelY: 0,         // peak accelY — for serve detection
+  _cooldownSamples: 0,         // remaining cooldown in samples
+  _activeWindows: 0,           // count of windows with motion > 1.5g
+  _totalWindows: 0,            // total tick count for active ratio
 
   // ── Render ─────────────────────────────────────────────────
   render(container, state) {
@@ -220,9 +235,12 @@ export default {
             <span class="u01-stat-value" data-el="maxspd">-- km/h</span>
           </div>
           <div class="u01-breakdown" data-el="breakdown"></div>
-          <div class="u01-sqi-mini">
-            <div class="u01-sqi-dot" data-el="sqidot"></div>
-            <span class="u01-sqi-text" data-el="sqitxt">SQI --</span>
+          <div class="u01-live-bar">
+            <div class="u01-live-dot" data-el="livedot"></div>
+            <span class="u01-live-text" data-el="livetxt">LIVE --</span>
+            <div class="u01-accel-bar">
+              <div class="u01-accel-fill" data-el="accelfill"></div>
+            </div>
           </div>
         </div>
 
@@ -252,52 +270,146 @@ export default {
     state.util.sizeCanvas(container.querySelector('.u01-court-canvas'));
     state.util.sizeCanvas(container.querySelector('.u01-timeline-canvas'));
 
+    // Read user-tunable params
+    this._STROKE_THRESHOLD = (state.params && state.params['Stroke Threshold']) || 3.0;
+    this._COOLDOWN_MS = (state.params && state.params['Cooldown']) || 600;
+
     // Init internal tracking
     this._strokes = [];
     this._typeCounts = [0, 0, 0, 0, 0];
     this._sessionStart = Date.now();
-    this._lastStrokeCount = 0;
+    this._totalProcessed = 0;
+    this._inSwing = false;
+    this._swingSamples = 0;
+    this._swingPeakAccel = 0;
+    this._swingPeakGyro = 0;
+    this._swingPeakGyroZ = 0;
+    this._swingPeakAccelY = 0;
+    this._cooldownSamples = 0;
+    this._activeWindows = 0;
+    this._totalWindows = 0;
 
     // Draw empty court
     this._drawCourt(container.querySelector('.u01-court-canvas'));
   },
 
-  // ── Update ─────────────────────────────────────────────────
+  // ── Update — live stroke detection from raw IMU ────────────
   update(container, state) {
-    const total = Math.round(state.output) || 0;
-    const sqi = state.sqi || 0;
-    const valid = total > 0;
+    const now = Date.now();
+    const elapsed = state.elapsed || 0;
 
-    // Detect new stroke from count increase
-    if (total > this._lastStrokeCount && state.sensorData) {
-      const newCount = total - this._lastStrokeCount;
-      for (let i = 0; i < newCount; i++) {
-        // Infer stroke from latest sensor data
-        const stroke = this._inferStroke(state);
-        this._strokes.push(stroke);
-        this._typeCounts[stroke.type]++;
+    // Read user params (may change at runtime)
+    this._STROKE_THRESHOLD = (state.params && state.params['Stroke Threshold']) || 3.0;
+    this._COOLDOWN_MS = (state.params && state.params['Cooldown']) || 600;
+
+    // ── Live stroke detection from per-axis IMU data ─────────
+    const ax = state.sensorData?.accelX;
+    const ay = state.sensorData?.accelY;
+    const az = state.sensorData?.accelZ;
+    const gx = state.sensorData?.gyroX;
+    const gy = state.sensorData?.gyroY;
+    const gz = state.sensorData?.gyroZ;
+
+    const hasAxisData = ax && ay && az && ax.history.length > 0;
+
+    if (hasAxisData) {
+      const len = ax.history.length;
+      // Use sampleCount to determine new samples (handles rolling buffer)
+      let newSamples;
+      if (typeof ax.sampleCount === 'number' && ax.sampleCount > 0) {
+        newSamples = Math.max(0, ax.sampleCount - this._totalProcessed);
+        this._totalProcessed = ax.sampleCount;
+      } else {
+        // Fallback: process last ~10 samples per update tick
+        newSamples = Math.min(10, len);
       }
-      this._lastStrokeCount = total;
+      const startIdx = Math.max(0, len - newSamples);
+
+      // Sample-based timing (LSM6DS3 @ 50Hz → 20ms per sample)
+      const samplePeriodMs = 20;
+      const cooldownInSamples = Math.round(this._COOLDOWN_MS / samplePeriodMs);
+      const swingWindowInSamples = Math.round(this._SWING_WINDOW_MS / samplePeriodMs);
+
+      for (let i = startIdx; i < len; i++) {
+        const axv = ax.history[i];
+        const ayv = ay.history[i];
+        const azv = az.history[i];
+        const gxv = gx ? gx.history[i] || 0 : 0;
+        const gyv = gy ? gy.history[i] || 0 : 0;
+        const gzv = gz ? gz.history[i] || 0 : 0;
+
+        const accelMag = Math.sqrt(axv * axv + ayv * ayv + azv * azv);
+        const gyroMag = Math.sqrt(gxv * gxv + gyv * gyv + gzv * gzv);
+
+        // Active ratio tracking
+        this._totalWindows++;
+        if (accelMag > 1.5) this._activeWindows++;
+
+        // Sample-based cooldown (avoids wall-clock batch issues)
+        if (this._cooldownSamples > 0) {
+          this._cooldownSamples--;
+          continue;
+        }
+
+        if (!this._inSwing) {
+          // ── Trigger: accel magnitude exceeds threshold ──
+          if (accelMag > this._STROKE_THRESHOLD) {
+            this._inSwing = true;
+            this._swingSamples = 0;
+            this._swingPeakAccel = accelMag;
+            this._swingPeakGyro = gyroMag;
+            this._swingPeakGyroZ = gzv;
+            this._swingPeakAccelY = ayv;
+          }
+        } else {
+          // ── Collect peaks during full swing window ──
+          this._swingSamples++;
+          if (accelMag > this._swingPeakAccel) this._swingPeakAccel = accelMag;
+          if (gyroMag > this._swingPeakGyro) this._swingPeakGyro = gyroMag;
+          if (Math.abs(gzv) > Math.abs(this._swingPeakGyroZ)) this._swingPeakGyroZ = gzv;
+          if (Math.abs(ayv) > Math.abs(this._swingPeakAccelY)) this._swingPeakAccelY = ayv;
+
+          // ── End swing ONLY when window expires (no early exit) ──
+          // Real tennis strokes have oscillating accel — early exit
+          // on accel dips splits one swing into multiple false detections
+          if (this._swingSamples >= swingWindowInSamples) {
+            const swingDurMs = this._swingSamples * samplePeriodMs;
+            const type = this._classifyStroke(
+              this._swingPeakGyroZ,
+              this._swingPeakAccelY,
+              this._swingPeakGyro,
+              swingDurMs
+            );
+            const speed = Math.min(Math.max(this._swingPeakGyro * this._SPEED_SCALE, 0), 250);
+
+            this._strokes.push({ type, speed, timestamp: now, elapsed });
+            this._typeCounts[type]++;
+
+            this._inSwing = false;
+            this._cooldownSamples = cooldownInSamples;
+          }
+        }
+      }
     }
 
+    const total = this._strokes.length;
+
     // ── Total strokes ──
-    container.querySelector('[data-el="total"]').textContent = valid ? total : '--';
+    container.querySelector('[data-el="total"]').textContent = total > 0 ? total : '--';
 
     // ── Session time ──
-    const elapsed = state.elapsed || 0;
     const mins = Math.floor(elapsed / 60000);
     const secs = Math.floor((elapsed % 60000) / 1000);
     container.querySelector('[data-el="session"]').textContent =
       `${mins}:${secs.toString().padStart(2, '0')}`;
 
     // ── Active ratio ──
-    // Estimate from history variance
-    const activeRatio = this._estimateActiveRatio(state);
+    const activeRatio = this._totalWindows > 0 ? this._activeWindows / this._totalWindows : 0;
     container.querySelector('[data-el="active"]').textContent =
       `${Math.round(activeRatio * 100)}%`;
 
     // ── Speed stats ──
-    if (this._strokes.length > 0) {
+    if (total > 0) {
       const speeds = this._strokes.map(s => s.speed);
       const avg = speeds.reduce((a, b) => a + b, 0) / speeds.length;
       const max = Math.max(...speeds);
@@ -315,18 +427,55 @@ export default {
       if (cnt) cnt.textContent = this._typeCounts[i];
     }
 
+    // ── Live indicator + accel magnitude bar ──
+    const liveDot = container.querySelector('[data-el="livedot"]');
+    const liveTxt = container.querySelector('[data-el="livetxt"]');
+    const accelFill = container.querySelector('[data-el="accelfill"]');
+    const accelMagNow = state.sensorData?.accel?.latest || 0;
+    const isOnline = state.sensorData?.accel?.online;
+
+    if (isOnline) {
+      const pctAccel = Math.min((accelMagNow / 8) * 100, 100); // 8g full-scale
+      accelFill.style.width = `${pctAccel}%`;
+      if (this._inSwing) {
+        liveDot.style.background = '#f59e0b';
+        liveTxt.textContent = `SWING ${accelMagNow.toFixed(1)}g`;
+        accelFill.style.background = '#f59e0b';
+      } else if (accelMagNow > this._STROKE_THRESHOLD * 0.5) {
+        liveDot.style.background = '#22c55e';
+        liveTxt.textContent = `LIVE ${accelMagNow.toFixed(1)}g`;
+        accelFill.style.background = '#22c55e';
+      } else {
+        liveDot.style.background = '#22c55e';
+        liveTxt.textContent = `LIVE ${accelMagNow.toFixed(1)}g`;
+        accelFill.style.background = 'var(--accent)';
+      }
+    } else {
+      liveDot.style.background = '#ef4444';
+      liveTxt.textContent = 'IMU offline';
+      accelFill.style.width = '0%';
+    }
+
     // ── Court heatmap ──
     this._drawCourt(container.querySelector('.u01-court-canvas'));
 
     // ── Speed timeline ──
     this._drawTimeline(container.querySelector('.u01-timeline-canvas'));
+  },
 
-    // ── SQI ──
-    const dot = container.querySelector('[data-el="sqidot"]');
-    const sqiColor = sqi > 0.7 ? '#22c55e' : sqi > 0.4 ? '#f59e0b' : '#ef4444';
-    dot.style.background = sqiColor;
-    container.querySelector('[data-el="sqitxt"]').textContent =
-      `SQI ${Math.round(sqi * 100)}`;
+  // ── Stroke classification (mirrors firmware logic) ─────────
+  // Srivastava et al. 2015 / Whiteside et al. 2017
+  _classifyStroke(peakGyroZ, peakAccelY, peakGyroMag, durationMs) {
+    // Serve: high vertical accel + fast rotation
+    if (Math.abs(peakAccelY) > this._SERVE_VERTICAL_G && peakGyroMag > 300) return 2;
+    // Forehand: positive gyroZ (pronation) — check before volley
+    if (peakGyroZ > 50) return 0;
+    // Backhand: negative gyroZ (supination)
+    if (peakGyroZ < -50) return 1;
+    // Volley: low gyro (compact stroke, no full swing rotation)
+    if (peakGyroMag < 150) return 3;
+    // Unclassified
+    return 4;
   },
 
   // ── Court heatmap drawing ──────────────────────────────────
@@ -369,10 +518,8 @@ export default {
     ctx.lineWidth = 1 * dpr;
     const boxW = cw / 2;
     const boxH = ch * 0.30;
-    // Top service boxes
     ctx.strokeRect(pad, netY - boxH, boxW, boxH);
     ctx.strokeRect(pad + boxW, netY - boxH, boxW, boxH);
-    // Bottom service boxes
     ctx.strokeRect(pad, netY, boxW, boxH);
     ctx.strokeRect(pad + boxW, netY, boxW, boxH);
 
@@ -393,8 +540,6 @@ export default {
     // Build zone counts from strokes
     const zones = new Array(cols * rows).fill(0);
     for (const s of this._strokes) {
-      // Map stroke type to preferred court zone
-      // This is metaphorical — based on typical play patterns
       const zone = this._strokeToZone(s.type, s.speed);
       if (zone >= 0 && zone < zones.length) zones[zone]++;
     }
@@ -405,8 +550,6 @@ export default {
         const idx = r * cols + c;
         const intensity = zones[idx] / maxZone;
         if (intensity > 0.01) {
-          const colors = Object.values(this._colors);
-          // Map to a warm heatmap
           const alpha = 0.15 + intensity * 0.55;
           ctx.fillStyle = `rgba(99, 102, 241, ${alpha})`;
           ctx.beginPath();
@@ -419,7 +562,6 @@ export default {
           );
           ctx.fill();
 
-          // Count label
           if (zones[idx] > 0) {
             ctx.fillStyle = `rgba(255,255,255,${0.4 + intensity * 0.6})`;
             ctx.font = `${10 * dpr}px JetBrains Mono, monospace`;
@@ -438,23 +580,12 @@ export default {
 
   // Map stroke type to approximate court zone (4×4 grid)
   _strokeToZone(type, speed) {
-    // Zones: rows 0-1 = far side, rows 2-3 = near side (player)
-    // Cols 0-1 = deuce side, cols 2-3 = ad side
-    // Baseline strokes → rows 3 (near baseline)
-    // Volleys → rows 1-2 (near net)
-    // Serves → rows 0 (far baseline)
-    const hash = (type * 7 + Math.floor(speed)) % 16;
     switch (type) {
-      case 0: // Forehand — near baseline, deuce or cross
-        return speed > 100 ? 14 : speed > 60 ? 13 : 12;
-      case 1: // Backhand — near baseline, ad side
-        return speed > 100 ? 15 : speed > 60 ? 12 : 11;
-      case 2: // Serve — far baseline
-        return speed > 150 ? 2 : speed > 100 ? 1 : 3;
-      case 3: // Volley — near net
-        return speed > 80 ? 5 : 6;
-      default:
-        return hash;
+      case 0: return speed > 100 ? 14 : speed > 60 ? 13 : 12; // FH → near baseline deuce
+      case 1: return speed > 100 ? 15 : speed > 60 ? 12 : 11; // BH → near baseline ad
+      case 2: return speed > 150 ? 2 : speed > 100 ? 1 : 3;   // SV → far baseline
+      case 3: return speed > 80 ? 5 : 6;                        // VO → near net
+      default: return (type * 7 + Math.floor(speed)) % 16;
     }
   },
 
@@ -469,7 +600,7 @@ export default {
     ctx.clearRect(0, 0, W, H);
 
     // Background
-    ctx.fillStyle = 'var(--bg-1, #12121a)';
+    ctx.fillStyle = '#12121a';
     ctx.fillRect(0, 0, W, H);
 
     if (this._strokes.length === 0) {
@@ -481,47 +612,41 @@ export default {
       return;
     }
 
-    const pad = { left: 32 * dpr, right: 8 * dpr, top: 8 * dpr, bottom: 16 * dpr };
-    const plotW = W - pad.left - pad.right;
-    const plotH = H - pad.top - pad.bottom;
+    const padL = 32 * dpr, padR = 8 * dpr, padT = 8 * dpr, padB = 16 * dpr;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
 
-    // Speed axis: 0–250 km/h
-    const maxSpeed = 250;
     const speeds = this._strokes.map(s => s.speed);
-    const sessionMax = Math.min(Math.max(...speeds) * 1.2, maxSpeed);
+    const sessionMax = Math.min(Math.max(...speeds) * 1.2, 250);
 
-    // Y-axis labels
+    // Y-axis labels + grid
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.font = `${9 * dpr}px JetBrains Mono, monospace`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (let spd = 0; spd <= sessionMax; spd += 50) {
-      const y = pad.top + plotH - (spd / sessionMax) * plotH;
-      ctx.fillText(`${spd}`, pad.left - 4 * dpr, y);
-      // Grid line
+      const y = padT + plotH - (spd / sessionMax) * plotH;
+      ctx.fillText(`${spd}`, padL - 4 * dpr, y);
       ctx.strokeStyle = 'rgba(255,255,255,0.06)';
       ctx.lineWidth = 1 * dpr;
       ctx.beginPath();
-      ctx.moveTo(pad.left, y);
-      ctx.lineTo(pad.left + plotW, y);
+      ctx.moveTo(padL, y);
+      ctx.lineTo(padL + plotW, y);
       ctx.stroke();
     }
 
     // Plot each stroke as a dot
     const colorArr = Object.values(this._colors);
-    const totalTime = this._strokes.length > 1
-      ? this._strokes[this._strokes.length - 1].elapsed - this._strokes[0].elapsed
-      : 1;
+    const t0 = this._strokes[0].timestamp;
+    const tEnd = this._strokes[this._strokes.length - 1].timestamp;
+    const totalTime = Math.max(tEnd - t0, 1);
 
     for (let i = 0; i < this._strokes.length; i++) {
       const s = this._strokes[i];
-      const xPct = this._strokes.length > 1
-        ? (s.elapsed - this._strokes[0].elapsed) / totalTime
-        : 0.5;
-      const x = pad.left + xPct * plotW;
-      const y = pad.top + plotH - (s.speed / sessionMax) * plotH;
+      const xPct = this._strokes.length > 1 ? (s.timestamp - t0) / totalTime : 0.5;
+      const x = padL + xPct * plotW;
+      const y = padT + plotH - (s.speed / sessionMax) * plotH;
 
-      // Dot
       ctx.fillStyle = colorArr[s.type] || colorArr[4];
       ctx.beginPath();
       ctx.arc(x, y, 3.5 * dpr, 0, Math.PI * 2);
@@ -537,39 +662,15 @@ export default {
     }
   },
 
-  // ── Helpers ────────────────────────────────────────────────
-  _inferStroke(state) {
-    // Infer stroke from latest sensor data snapshot
-    const accel = state.sensorData?.accel;
-    const gyro = state.sensorData?.gyro;
-    const speed = (gyro?.latest || 300) * 0.42;
-    const elapsed = state.elapsed || 0;
-
-    // Simple type inference from gyro sign
-    let type = 4; // unclassified
-    if (gyro && accel) {
-      const gz = gyro.latest || 0;
-      const ay = accel.latest || 0;
-      if (Math.abs(ay) > 2.5 && Math.abs(gz) > 400) type = 2; // serve
-      else if (gz > 50) type = 0; // forehand
-      else if (gz < -50) type = 1; // backhand
-      else type = 3; // volley
-    }
-
-    return { type, speed: Math.min(Math.max(speed, 0), 250), elapsed };
-  },
-
-  _estimateActiveRatio(state) {
-    if (!state.history || state.history.length < 10) return 0;
-    // Rough estimate: ratio of non-zero output periods
-    const recent = state.history.slice(-60);
-    const active = recent.filter(v => v > 0).length;
-    return active / recent.length;
-  },
-
   // ── Destroy ────────────────────────────────────────────────
   destroy(container) {
     this._strokes = [];
     this._typeCounts = [0, 0, 0, 0, 0];
+    this._totalProcessed = 0;
+    this._inSwing = false;
+    this._swingSamples = 0;
+    this._cooldownSamples = 0;
+    this._activeWindows = 0;
+    this._totalWindows = 0;
   },
 };
